@@ -6,19 +6,16 @@ import { Spinner } from './Spinner';
 
 interface WikiSoloPageProps {
   pageName: string;
-  onPageSelect: (title: string) => void;
+  onPageSelect: (page: string) => void;
   onClickCount: (count: number) => void;
   clickCount: number;
   goalTitle?: string; // ゴールページのタイトル（オプショナル）
-  onLinkClick?: (title: string) => void; // テスト環境用にオプショナルにする
 }
 
-export default function WikiSoloPage({ pageName, onPageSelect, onClickCount, clickCount, goalTitle, onLinkClick }: WikiSoloPageProps) {
+export default function WikiSoloPage({ pageName, onPageSelect, onClickCount, clickCount, goalTitle }: WikiSoloPageProps) {
   const [content, setContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 過去に取得したページのキャッシュ
-  const [pageCache, setPageCache] = useState<Record<string, string>>({});
 
   // ウィキペディアのコンテンツをクリーニングする関数
   const cleanWikipediaContent = useCallback((htmlContent: string): string => {
@@ -152,103 +149,6 @@ export default function WikiSoloPage({ pageName, onPageSelect, onClickCount, cli
     });
   }, []);
 
-  // テスト環境かどうかを判断する関数
-  const isTestEnvironment = useCallback(() => {
-    return typeof window !== 'undefined' && window.navigator.userAgent.includes('Node.js') || 
-           typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
-  }, []);
-
-  // テスト環境用のコンテンツ設定
-  useEffect(() => {
-    if (!isTestEnvironment()) return;
-
-    const contentDiv = document.getElementById('solo-wikipedia-content');
-    if (!contentDiv) return;
-
-    // テスト用のリンクを追加
-    contentDiv.innerHTML = `
-      <div>
-        <a href="/wiki/Link1">リンク1</a>
-        <a href="/wiki/Link2">リンク2</a>
-        <a href="/wiki/Link3">リンク3</a>
-        <a href="/wiki/ゴールページ">ゴールへ</a>
-      </div>
-    `;
-
-    // リンクにイベントリスナーを追加
-    const links = contentDiv.querySelectorAll('a');
-    links.forEach(link => {
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        const href = link.getAttribute('href');
-        if (href && href.startsWith('/wiki/')) {
-          const newPageName = href.substring(6);
-          if (onLinkClick) {
-            onLinkClick(newPageName);
-          }
-        }
-      });
-    });
-  }, [onLinkClick, isTestEnvironment]);
-
-  // コンテンツを取得する関数
-  const fetchContent = useCallback(async () => {
-    // テスト環境ではコンテンツ取得をスキップ
-    if (isTestEnvironment()) {
-      return;
-    }
-
-    if (!pageName) return;
-    
-    // キャッシュにあればそれを使用
-    if (pageCache[pageName]) {
-      console.log(`Using cached content for: ${pageName}`);
-      setContent(pageCache[pageName]);
-      return;
-    }
-    
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // タイトルを正しくエンコードしてAPIにリクエスト
-      const encodedTitle = encodeURIComponent(pageName);
-      console.log(`Fetching Wikipedia content for: ${pageName} (encoded: ${encodedTitle})`);
-      
-      const response = await fetch(`/api/wikipedia?title=${encodedTitle}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`API Error (${response.status}):`, errorText);
-        throw new Error(`ページ取得に失敗しました (${response.status})`);
-      }
-      
-      const data = await response.json();
-      
-      if (!data.content) {
-        console.error('API response has no content:', data);
-        throw new Error('コンテンツが取得できませんでした');
-      }
-      
-      // コンテンツをクリーニングして本文のみ抽出
-      const cleanedContent = cleanWikipediaContent(data.content);
-      
-      // キャッシュに保存
-      setPageCache(prev => ({
-        ...prev,
-        [pageName]: cleanedContent
-      }));
-      
-      setContent(cleanedContent);
-      console.log('Wikipedia content loaded successfully');
-    } catch (err) {
-      console.error('Error fetching Wikipedia content:', err);
-      setError('コンテンツの取得中にエラーが発生しました。');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [pageName, pageCache, isTestEnvironment]);
-
   // ページが変更されたらウィキペディアのコンテンツを取得
   useEffect(() => {
     // pageNameが空文字列の場合は何もしない
@@ -257,8 +157,44 @@ export default function WikiSoloPage({ pageName, onPageSelect, onClickCount, cli
       return;
     }
     
+    const fetchContent = async () => {
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        // タイトルを正しくエンコードしてAPIにリクエスト
+        const encodedTitle = encodeURIComponent(pageName);
+        console.log(`Fetching Wikipedia content for: ${pageName} (encoded: ${encodedTitle})`);
+        
+        const response = await fetch(`/api/wikipedia?title=${encodedTitle}`);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`API Error (${response.status}):`, errorText);
+          throw new Error(`ページの取得に失敗しました (${response.status})`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.content) {
+          console.error('API response has no content:', data);
+          throw new Error('コンテンツが取得できませんでした');
+        }
+        
+        // コンテンツをクリーニングして本文のみ抽出
+        const cleanedContent = cleanWikipediaContent(data.content);
+        setContent(cleanedContent);
+        console.log('Wikipedia content loaded successfully');
+      } catch (err) {
+        console.error('Error fetching Wikipedia content:', err);
+        setError('コンテンツの取得中にエラーが発生しました。');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     fetchContent();
-  }, [pageName, fetchContent]);
+  }, [pageName, cleanWikipediaContent]);
 
   // コンテンツがロードされたら、リンクにイベントリスナーを追加
   useEffect(() => {
