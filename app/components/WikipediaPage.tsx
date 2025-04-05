@@ -45,6 +45,13 @@ export function WikipediaPage({ pageName }: WikipediaPageProps) {
       '.toc', // 目次
       '.mw-editsection', // 編集リンク
       '.ambox', // 警告ボックス
+      '.tmbox', // テンプレートメッセージボックス
+      '.cmbox', // コンテンツメッセージボックス
+      '.ombox', // オブジェクトメッセージボックス
+      '.dmbox', // 議論メッセージボックス
+      '.fmbox', // ファイルメッセージボックス
+      '.smbox', // スタイルメッセージボックス
+      '.imbox', // 画像メッセージボックス
       '.thumb', // サムネイル（画像）
       '.infobox', // 情報ボックス
       '.navbox', // ナビゲーションボックス
@@ -52,6 +59,9 @@ export function WikipediaPage({ pageName }: WikipediaPageProps) {
       'table.metadata', // メタデータテーブル
       '.reference', // 参考文献
       '.references', // 参考文献リスト
+      '.reflist', // 参考文献リスト
+      '.refbegin', // 参考文献開始
+      '.refend', // 参考文献終了
       '.noprint', // 印刷時に表示しない要素
       '.hatnote', // 帽子メモ
       '.mw-empty-elt', // 空の要素
@@ -67,12 +77,64 @@ export function WikipediaPage({ pageName }: WikipediaPageProps) {
       '.mbox-small', // 小さいメッセージボックス
       '.shortdescription', // 短い説明
       '.side-box', // サイドボックス
+      'div[role="note"]', // 注釈役割の要素
+      'div[role="complementary"]', // 補完要素
+      '.sister-project', // 関連プロジェクト
+      '.sistersitebox', // 姉妹サイトボックス
+      '.wikisource-inline', // Wikisourceインライン
+      '.mw-references-wrap', // 参考文献ラッパー
+      '.reference-text', // 参考文献テキスト
+      '.citation', // 引用
+      'ol.references', // 参考文献順序リスト
+      '.printfooter', // 印刷フッター
+      '.catlinks', // カテゴリリンク
     ];
 
     // 指定したセレクタに一致する要素を削除
     selectorsToRemove.forEach(selector => {
       const elements = element.querySelectorAll(selector);
       elements.forEach(el => el.parentNode?.removeChild(el));
+    });
+
+    // 「この項目は〜」で始まるテキストを含む段落を削除
+    const paragraphs = element.querySelectorAll('p');
+    paragraphs.forEach(p => {
+      const text = p.textContent?.trim() || '';
+      if (
+        text.startsWith('この項目は') ||
+        text.startsWith('この記事は') ||
+        text.includes('関連した書きかけ') ||
+        text.includes('加筆する必要が') ||
+        text.includes('ノートを参照してください')
+      ) {
+        p.parentNode?.removeChild(p);
+      }
+    });
+
+    // 「出典」「参考文献」「外部リンク」などのセクション全体を削除
+    const headings = element.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    headings.forEach(heading => {
+      const headingText = heading.textContent?.trim().toLowerCase() || '';
+      if (
+        headingText.includes('出典') ||
+        headingText.includes('参考文献') ||
+        headingText.includes('外部リンク') ||
+        headingText.includes('脚注') ||
+        headingText.includes('注釈')
+      ) {
+        // 見出し自体を削除
+        heading.parentNode?.removeChild(heading);
+        
+        // 次の見出しまでの要素をすべて削除
+        let currentNode = heading.nextSibling;
+        while (currentNode && 
+              !(currentNode instanceof HTMLElement && 
+                currentNode.tagName.match(/^H[1-6]$/))) {
+          const nextNode = currentNode.nextSibling;
+          currentNode.parentNode?.removeChild(currentNode);
+          currentNode = nextNode;
+        }
+      }
     });
 
     // 外部リンク（aタグでhttpから始まるもの）の親要素内のテキストは残す
@@ -88,8 +150,8 @@ export function WikipediaPage({ pageName }: WikipediaPageProps) {
     });
 
     // 見出しのセクション（hタグ）は見出しテキストのみ残す
-    const headings = element.querySelectorAll('h1, h2, h3, h4, h5, h6');
-    headings.forEach(heading => {
+    const allHeadings = element.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    allHeadings.forEach(heading => {
       // 見出しの中の不要な要素（編集リンクなど）を削除
       const unwantedChildren = heading.querySelectorAll('.mw-headline + *');
       unwantedChildren.forEach(child => child.parentNode?.removeChild(child));
@@ -274,7 +336,12 @@ export function WikipediaPage({ pageName }: WikipediaPageProps) {
         /* 参考文献や外部リンクセクションを非表示 */
         .wikipedia-content .reflist,
         .wikipedia-content .references,
-        .wikipedia-content .external {
+        .wikipedia-content .external,
+        .wikipedia-content .reference,
+        .wikipedia-content [role="note"],
+        .wikipedia-content .mw-references-wrap,
+        .wikipedia-content .reference-text,
+        .wikipedia-content .citation {
           display: none !important;
         }
       `}</style>
