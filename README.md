@@ -63,6 +63,14 @@ WIKIPEDIA_BASE_URL=https://ja.wikipedia.org
 WIKIPEDIA_API_PATH=/w/api.php
 WIKIPEDIA_REST_API_PATH=/api/rest_v1/page/summary
 WIKIPEDIA_RANDOM_PATH=/wiki/Special:Random
+
+# Socket.IO設定
+# 開発環境用
+SOCKET_PORT=3001
+NEXT_PUBLIC_SOCKET_URL="http://localhost:3001"
+
+# 本番環境用
+NEXT_PUBLIC_SOCKET_URL="/"
 ```
 
 開発環境では `.env.local` ファイル、本番環境では `.env.production` ファイルに設定してください。

@@ -75,18 +75,41 @@ async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
 // Socket.IOサーバーを初期化する関数
 function initSocketServer() {
   if (!io) {
-    // @ts-expect-error - これはNext.js App RouterでのSocket.IOの設定に必要
+    // Next.js App RouterでのSocket.IOの設定
     if (!(global as Record<string, any>).io) {
       console.log('Initializing Socket.IO server');
       
       // Socket.IOサーバーの初期化
-      io = new Server({
-        cors: {
-          origin: '*',
-        },
-      });
+      // 開発環境と本番環境で異なる設定を使用
+      if (process.env.NODE_ENV === 'development') {
+        // 開発環境ではスタンドアロンのSocket.IOサーバーを使用
+        io = new Server({
+          cors: {
+            origin: '*',
+          },
+        });
+        
+        // 開発環境用のポート設定
+        const port = parseInt(process.env.SOCKET_PORT || '3001', 10);
+        try {
+          io.listen(port);
+          console.log(`Socket.IO server started on port ${port} (development mode)`);
+        } catch (err) {
+          console.error('Failed to start Socket.IO server:', err);
+        }
+      } else {
+        // 本番環境ではSocket.IOサーバーをHTTPモジュールなしで初期化
+        // Next.jsのAPIルートとして実行される
+        io = new Server({
+          cors: {
+            origin: '*',
+          },
+          path: '/api/socketio',
+        });
+        console.log('Socket.IO server initialized in production mode');
+      }
       
-      // @ts-expect-error - Socket.IOインスタンスをグローバルスコープに保存
+      // Socket.IOインスタンスをグローバルスコープに保存
       (global as Record<string, any>).io = io;
       
       io.on('connection', (socket) => {
@@ -287,11 +310,6 @@ function initSocketServer() {
           });
         });
       });
-      
-      // Socket.IOサーバーをポート設定
-      const port = parseInt(process.env.PORT || '3001', 10);
-      io.listen(port);
-      console.log(`Socket.IO server started on port ${port}`);
     } else {
       // 既存のSocket.IOインスタンスを使用
       io = (global as Record<string, any>).io;

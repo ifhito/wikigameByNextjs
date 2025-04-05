@@ -77,9 +77,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           (process.env.NODE_ENV === 'production' 
             ? window.location.origin 
             : 'http://localhost:3001');
+        
+        // Socket.IOの設定オプション
+        const socketOptions = {
+          // 本番環境の場合はAPIルートのパスを設定
+          ...(process.env.NODE_ENV === 'production' && { path: '/api/socketio' })
+        };
           
-        console.log('Connecting to Socket.IO server at:', socketURL);
-        const socketInstance = io(socketURL);
+        console.log('Connecting to Socket.IO server at:', socketURL, socketOptions);
+        const socketInstance = io(socketURL, socketOptions);
 
         socketInstance.on('connect', () => {
           console.log('Connected to socket server');
