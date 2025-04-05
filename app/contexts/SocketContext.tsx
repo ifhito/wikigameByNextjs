@@ -72,13 +72,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     fetch('/api/socket')
       .then(() => {
         // Socket.IOクライアントの初期化
-        // 開発環境では localhost:3001、本番環境ではウィンドウのオリジンを使用
-        const socketURL = process.env.NODE_ENV === 'production' 
-          ? window.location.origin.replace(/^http/, 'ws')
-          : 'http://localhost:3001';
+        // すべての環境で同じURLを使用する (サーバーと同じオリジン)
+        const socketURL = window.location.origin;
           
         console.log('Connecting to Socket.IO server at:', socketURL);
-        const socketInstance = io(socketURL);
+        const socketInstance = io({
+          path: '/socket.io', // デフォルトパス
+          reconnectionDelay: 1000,
+          reconnection: true,
+          reconnectionAttempts: 10,
+          transports: ['websocket', 'polling'],
+          agent: false,
+          upgrade: true,
+          rejectUnauthorized: false
+        });
 
         socketInstance.on('connect', () => {
           console.log('Connected to socket server');
