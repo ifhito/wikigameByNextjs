@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, ServerOptions } from 'socket.io';
 import { processPageSelection } from '../../../utils/goal-detector';
-import { createServer } from 'http';
+import { createServer, Server as HTTPServer } from 'http';
 
 // 型定義
 interface Player {
@@ -70,7 +70,7 @@ async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
 }
 
 // Socket.IOサーバーのセットアップ
-export function setupSocketIO(httpServer: any = null): SocketIOServer {
+export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOServer {
   if (io) return io;
 
   // 設定オプション
