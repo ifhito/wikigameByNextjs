@@ -1,6 +1,6 @@
 'use client';
 
-import { SoloGame } from './SoloGame';
+import SoloGame from './SoloGame';
 
 export default function SoloModePage() {
   return (
