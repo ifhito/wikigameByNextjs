@@ -12,6 +12,7 @@ export interface Player {
   goalDescription?: string;
   isReady: boolean;
   isWinner: boolean;
+  consecutiveTurnsLeft: number; // 連続ターン残り回数
 }
 
 export interface Room {
@@ -32,10 +33,11 @@ interface SocketContextType {
   room: Room | null;
   roomId: string | null;
   playerName: string;
+  canUseContinuousTurn: boolean; // 連続ターンが使用可能かどうか
   createRoom: (playerName: string) => void;
   joinRoom: (roomId: string, playerName: string) => void;
   startGame: () => void;
-  selectPage: (pageName: string) => void;
+  selectPage: (pageName: string, useContinuousTurn?: boolean) => void; // 連続ターンフラグを追加
   setPlayerName: (name: string) => void;
 }
 
@@ -47,6 +49,7 @@ const SocketContext = createContext<SocketContextType>({
   room: null,
   roomId: null,
   playerName: '',
+  canUseContinuousTurn: false,
   createRoom: () => {},
   joinRoom: () => {},
   startGame: () => {},
@@ -69,6 +72,7 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
   const [room, setRoom] = useState<Room | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
+  const [canUseContinuousTurn, setCanUseContinuousTurn] = useState<boolean>(false);
 
   useEffect(() => {
     // Socket.IOの初期状態を確認
@@ -139,9 +143,11 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
       setRoom(room);
     }
 
-    function onPageSelected({ room }: { room: Room }) {
-      console.log('Page selected');
+    function onPageSelected({ room, canUseContinuousTurn }: { room: Room, canUseContinuousTurn?: boolean }) {
+      console.log('Page selected', canUseContinuousTurn ? 'with continuous turn option' : '');
       setRoom(room);
+      // 連続ターンが使用可能かどうかの状態を更新
+      setCanUseContinuousTurn(!!canUseContinuousTurn);
     }
 
     function onGameFinished({ room }: { room: Room }) {
@@ -214,10 +220,10 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
   };
 
   // ページ選択
-  const selectPage = (pageName: string) => {
+  const selectPage = (pageName: string, useContinuousTurn: boolean = false) => {
     if (isConnected && roomId) {
-      console.log('Selecting page:', pageName, 'in room:', roomId);
-      socket.emit('select-page', { roomId, pageName });
+      console.log('Selecting page:', pageName, 'in room:', roomId, useContinuousTurn ? 'with continuous turn' : '');
+      socket.emit('select-page', { roomId, pageName, useContinuousTurn });
     } else {
       console.error('Socket not connected or room ID not set when trying to select page');
       setConnectionError('ページを選択できません。再読み込みしてください。');
@@ -232,6 +238,7 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
       room, 
       roomId, 
       playerName,
+      canUseContinuousTurn,
       createRoom,
       joinRoom,
       startGame,

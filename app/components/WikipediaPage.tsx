@@ -15,10 +15,11 @@ interface WikipediaData {
 }
 
 export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPlayer }) => {
-  const { selectPage } = useSocket();
+  const { selectPage, canUseContinuousTurn } = useSocket();
   const [loading, setLoading] = useState<boolean>(true);
   const [data, setData] = useState<WikipediaData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [useContinuousTurn, setUseContinuousTurn] = useState<boolean>(false);
 
   useEffect(() => {
     if (!title) return;
@@ -69,7 +70,7 @@ export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPl
             e.preventDefault();
             const pageName = link.getAttribute('title') || link.textContent;
             if (pageName) {
-              selectPage(pageName);
+              selectPage(pageName, useContinuousTurn);
             }
           });
           
@@ -86,7 +87,7 @@ export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPl
         link.style.pointerEvents = 'none';
       }
     });
-  }, [data, isCurrentPlayer, selectPage]);
+  }, [data, isCurrentPlayer, selectPage, useContinuousTurn]);
 
   if (loading) {
     return <div className="p-4 text-center text-gray-800">ページを読み込み中...</div>;
@@ -104,6 +105,27 @@ export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPl
       {!isCurrentPlayer && (
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
           <p className="text-blue-800 font-medium">他のプレイヤーの番です。あなたの番になるまでお待ちください。</p>
+        </div>
+      )}
+
+      {/* 自分の番かつ連続ターンが使用可能な時にのみ表示 */}
+      {isCurrentPlayer && canUseContinuousTurn && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+          <div className="flex items-center justify-between">
+            <p className="text-green-800 font-medium">連続ターンを使用できます（最大3回まで）</p>
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="useContinuousTurn"
+                checked={useContinuousTurn}
+                onChange={(e) => setUseContinuousTurn(e.target.checked)}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label htmlFor="useContinuousTurn" className="ml-2 text-sm font-medium text-gray-700">
+                連続ターンを使用する
+              </label>
+            </div>
+          </div>
         </div>
       )}
       

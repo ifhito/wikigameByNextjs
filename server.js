@@ -12,6 +12,7 @@ import { Server } from "socket.io";
  * @property {string} [goalDescription] - 目標ページの説明
  * @property {boolean} isReady - 準備完了状態
  * @property {boolean} isWinner - 勝者かどうか
+ * @property {number} consecutiveTurnsLeft - 連続ターンの残り回数（最大3回）
  */
 
 /**
@@ -86,9 +87,10 @@ const setWinner = (room, goalPlayerId) => {
  * @param {Room} room - 部屋情報
  * @param {string} pageName - 選択されたページ名
  * @param {string} socketId - ソケットID
- * @returns {{success: boolean, isGoal: boolean, goalPlayer: Player|null, message?: string}} - 処理結果
+ * @param {boolean} [useContinuousTurn=false] - 連続ターンを使用するかどうか
+ * @returns {{success: boolean, isGoal: boolean, goalPlayer: Player|null, message?: string, canUseContinuousTurn?: boolean}} - 処理結果
  */
-const processPageSelection = (room, pageName, socketId) => {
+const processPageSelection = (room, pageName, socketId, useContinuousTurn = false) => {
   // 現在のプレイヤーかどうかチェック
   const currentPlayer = room.players[room.currentPlayerIndex];
   if (currentPlayer.id !== socketId) {
@@ -116,12 +118,25 @@ const processPageSelection = (room, pageName, socketId) => {
       goalPlayer 
     };
   } else {
-    // 次のプレイヤーへ
-    room.currentPlayerIndex = nextPlayerIndex;
+    // 連続ターンを使用する場合は現在のプレイヤーのまま
+    if (useContinuousTurn && currentPlayer.consecutiveTurnsLeft > 0) {
+      // 連続ターン数を減らす
+      currentPlayer.consecutiveTurnsLeft--;
+      console.log(`連続ターン使用: ${currentPlayer.name} の残り連続ターン数: ${currentPlayer.consecutiveTurnsLeft}`);
+    } else {
+      // 次のプレイヤーへ
+      room.currentPlayerIndex = nextPlayerIndex;
+      // 新しいプレイヤーが始まるときは連続ターン数をリセット（最大3回）
+      if (room.players[room.currentPlayerIndex]) {
+        room.players[room.currentPlayerIndex].consecutiveTurnsLeft = 3;
+      }
+    }
+    
     return { 
       success: true, 
       isGoal: false, 
-      goalPlayer: null 
+      goalPlayer: null,
+      canUseContinuousTurn: currentPlayer.consecutiveTurnsLeft > 0 && useContinuousTurn
     };
   }
 };
@@ -199,6 +214,7 @@ app.prepare().then(() => {
             goalDescription: goalPageInfo.description,
             isReady: true,
             isWinner: false,
+            consecutiveTurnsLeft: 3, // 連続ターン数を初期化
           },
         ],
         status: 'waiting',
@@ -248,6 +264,7 @@ app.prepare().then(() => {
         goalDescription: goalPageInfo.description,
         isReady: true,
         isWinner: false,
+        consecutiveTurnsLeft: 3, // 連続ターン数を初期化
       };
 
       room.players.push(player);
@@ -296,6 +313,7 @@ app.prepare().then(() => {
         const goalPageInfo = await getRandomWikipediaPage();
         player.goalPage = goalPageInfo.title;
         player.goalDescription = goalPageInfo.description;
+        player.consecutiveTurnsLeft = 3; // 連続ターン数をリセット
       }
 
       // ランダムな開始ページを設定
@@ -309,7 +327,7 @@ app.prepare().then(() => {
     });
 
     // プレイヤーがページを選択
-    socket.on('select-page', async ({ roomId, pageName }) => {
+    socket.on('select-page', async ({ roomId, pageName, useContinuousTurn }) => {
       console.log(`ページ選択: ${socket.id} が ${pageName} を選択しました (部屋: ${roomId})`);
       const room = rooms[roomId];
 
@@ -323,8 +341,8 @@ app.prepare().then(() => {
         return;
       }
 
-      // ゴール判定処理
-      const result = processPageSelection(room, pageName, socket.id);
+      // ゴール判定処理 - 連続ターンフラグを渡す
+      const result = processPageSelection(room, pageName, socket.id, useContinuousTurn);
       
       if (!result.success) {
         socket.emit('error', { message: result.message || 'エラーが発生しました' });
@@ -336,7 +354,11 @@ app.prepare().then(() => {
         io.to(roomId).emit('game-finished', { room, winner: result.goalPlayer });
       } else {
         console.log(`次のプレイヤーへ: プレイヤーインデックス ${room.currentPlayerIndex}`);
-        io.to(roomId).emit('page-selected', { room });
+        io.to(roomId).emit('page-selected', { 
+          room,
+          // 連続ターンが使用可能かどうかの情報を含める
+          canUseContinuousTurn: room.players[room.currentPlayerIndex].consecutiveTurnsLeft > 0
+        });
       }
     });
 
