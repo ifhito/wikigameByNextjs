@@ -70,7 +70,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     // サーバー起動を確認
     fetch('/api/socket')
-      .then(() => {
+      .then((response) => response.text())
+      .then((text) => {
+        console.log('Socket API response:', text);
+        
         // Socket.IOクライアントの初期化
         // 環境変数から接続先を取得するか、デフォルト値を使用
         const socketURL = process.env.NEXT_PUBLIC_SOCKET_URL || 
@@ -81,19 +84,28 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Socket.IOの設定オプション
         const socketOptions = {
           // 本番環境の場合はAPIルートのパスを設定
-          ...(process.env.NODE_ENV === 'production' && { path: '/api/socketio' })
+          ...(process.env.NODE_ENV === 'production' && { 
+            path: '/api/socket/io',
+            transports: ['polling', 'websocket'],
+          }),
+          autoConnect: true,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 20000,
         };
           
         console.log('Connecting to Socket.IO server at:', socketURL, socketOptions);
         const socketInstance = io(socketURL, socketOptions);
 
         socketInstance.on('connect', () => {
-          console.log('Connected to socket server');
+          console.log('Connected to socket server with ID:', socketInstance.id);
           setConnected(true);
+          setError(null);
         });
 
         socketInstance.on('connect_error', (err) => {
-          console.error('Socket connection error:', err);
+          console.error('Socket connection error:', err, err.message);
           setError(`サーバー接続エラー: ${err.message}`);
         });
 
