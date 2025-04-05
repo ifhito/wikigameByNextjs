@@ -71,38 +71,22 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
   const [playerName, setPlayerName] = useState<string>('');
 
   useEffect(() => {
-    // サーバーのエンドポイントが有効かどうかまず確認
-    const checkSocketServer = async () => {
-      try {
-        const apiEndpoint = '/api/socket/io';
-        const response = await fetch(apiEndpoint);
-        if (!response.ok) {
-          throw new Error(`Socket server check failed: ${response.statusText}`);
-        }
-        console.log('Socket server check successful, attempting to connect...');
-        return true;
-      } catch (error) {
-        console.error('Socket server check failed:', error);
-        setConnectionError('Failed to connect to socket server. Please try again later.');
-        return false;
-      }
-    };
-
+    // Socket.IOサーバーに接続
     const initializeSocket = async () => {
-      const serverIsUp = await checkSocketServer();
-      if (!serverIsUp) return;
-
       try {
+        // 環境に応じたURLとオプションを設定
+        const socketURL = process.env.NEXT_PUBLIC_SOCKET_URL || '';
         const socketOptions = {
-          path: '/api/socket/io',
+          path: '/socket.io',
           transports: ['polling', 'websocket'],
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
           autoConnect: true,
+          forceNew: true, // 新しい接続を強制する
         };
 
         console.log('Initializing socket with options:', socketOptions);
-        const socketInstance = io('', socketOptions);
+        const socketInstance = io(socketURL, socketOptions);
 
         socketInstance.on('connect', () => {
           console.log('Socket connected:', socketInstance.id);
@@ -112,7 +96,7 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
 
         socketInstance.on('connect_error', (err) => {
           console.error('Socket connection error:', err);
-          setConnectionError(`Connection error: ${err.message}`);
+          setConnectionError(`Connection error: server error`);
           setIsConnected(false);
         });
 

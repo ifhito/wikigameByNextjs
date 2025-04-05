@@ -1,5 +1,6 @@
 import { Server as SocketIOServer, ServerOptions } from 'socket.io';
 import { processPageSelection } from '../../../utils/goal-detector';
+import { createServer } from 'http';
 
 // 型定義
 interface Player {
@@ -69,7 +70,7 @@ async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
 }
 
 // Socket.IOサーバーのセットアップ
-export function setupSocketIO(httpServer: unknown = null): SocketIOServer {
+export function setupSocketIO(httpServer: any = null): SocketIOServer {
   if (io) return io;
 
   // 設定オプション
@@ -78,6 +79,7 @@ export function setupSocketIO(httpServer: unknown = null): SocketIOServer {
       origin: '*',
       methods: ['GET', 'POST'],
     },
+    path: '/socket.io', // Next.jsのAPI Routes環境では/socket.ioパスを使用する必要がある
     transports: ['polling', 'websocket'] as Transport[],
     allowEIO3: true,
     pingTimeout: 30000,
@@ -89,15 +91,20 @@ export function setupSocketIO(httpServer: unknown = null): SocketIOServer {
     console.log('Setting up Socket.IO with provided HTTP server');
     io = new SocketIOServer(httpServer, options);
   } else {
-    // スタンドアロンモード
+    // スタンドアロンモード - Next.jsの開発環境ではHTTPサーバーを作成
     console.log('Setting up standalone Socket.IO server');
-    io = new SocketIOServer(options);
     
-    // 開発環境でスタンドアロンで起動する場合
+    // 開発環境でHTTPサーバーを作成
     if (process.env.NODE_ENV === 'development') {
+      const httpServer = createServer();
+      io = new SocketIOServer(httpServer, options);
+      
       const port = parseInt(process.env.SOCKET_PORT || '3001', 10);
-      io.listen(port);
+      httpServer.listen(port);
       console.log(`Socket.IO server listening on port ${port} (development mode)`);
+    } else {
+      // 本番環境ではオプションのみでSocket.IOを初期化
+      io = new SocketIOServer(options);
     }
   }
 
@@ -302,17 +309,6 @@ export function setupSocketIO(httpServer: unknown = null): SocketIOServer {
       });
     });
   });
-
-  // 開発モードの場合はポートでSocket.IOサーバーをリッスン
-  if (process.env.NODE_ENV === 'development') {
-    const port = parseInt(process.env.SOCKET_PORT || '3001', 10);
-    try {
-      io.listen(port);
-      console.log(`Socket.IO server started on port ${port} (development mode)`);
-    } catch (err) {
-      console.error('Failed to start Socket.IO server:', err);
-    }
-  }
 
   return io;
 } 
