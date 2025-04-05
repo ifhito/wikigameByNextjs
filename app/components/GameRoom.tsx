@@ -13,6 +13,17 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
   const { socket, room, startGame, useContinuousTurn, toggleContinuousTurn } = useSocket();
   const [copied, setCopied] = React.useState(false);
 
+  // ページタイトルを正規化する関数
+  const normalizePageTitle = (title: string): string => {
+    if (!title) return '';
+    // 空白を削除し、小文字に変換
+    return title.trim().toLowerCase()
+      // 括弧内の注釈（地名など）を削除
+      .replace(/\s*\([^)]*\)\s*/g, '')
+      // 特殊文字と記号を削除
+      .replace(/[・.,:;'"!?_\-\s]/g, '');
+  };
+
   if (!socket || !room) {
     return <div className="p-8 text-center text-gray-800">読み込み中...</div>;
   }
@@ -24,6 +35,19 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
   const isWaiting = room.status === 'waiting';
   const isPlaying = room.status === 'playing';
   const isFinished = room.status === 'finished';
+  
+  // 勝者が存在するかチェック
+  const winner = room.players.find(p => p.isWinner);
+
+  // 現在のページがプレイヤーのゴールページと一致するかチェック
+  const isGoalReached = isPlaying && room.players.some(player => {
+    if (player.id !== socket.id) return false;
+    
+    const normalizedCurrentPage = normalizePageTitle(room.currentPage);
+    const normalizedGoalPage = normalizePageTitle(player.goalPage);
+    
+    return normalizedCurrentPage === normalizedGoalPage || room.currentPage === player.goalPage;
+  });
 
   const copyRoomId = async () => {
     try {
@@ -158,22 +182,26 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
             </div>
           )}
 
-          {isPlaying && room.currentPage && (
+          {isPlaying && !isGoalReached && room.currentPage && (
             <WikipediaPage pageName={room.currentPage} />
           )}
 
-          {isFinished && (
+          {(isFinished || isGoalReached) && (
             <div className="bg-white rounded-lg shadow p-8 text-center">
               <h2 className="text-2xl font-bold mb-4 text-gray-900">ゲーム終了!</h2>
               
               {/* 勝者の情報を表示 */}
-              {room.players.find(p => p.isWinner) && (
+              {(winner || (isGoalReached && room.players.find(p => p.id === socket.id))) && (
                 <>
                   <p className="text-xl mb-2 text-gray-900">
-                    <span className="font-bold">{room.players.find(p => p.isWinner)?.name}</span> さんの勝利です!
+                    <span className="font-bold">
+                      {winner ? winner.name : room.players.find(p => p.id === socket.id)?.name}
+                    </span> さんの勝利です!
                   </p>
                   <p className="text-md mb-6 text-gray-700">
-                    ゴールページ「<span className="font-medium">{room.players.find(p => p.isWinner)?.goalPage}</span>」に到達しました
+                    ゴールページ「<span className="font-medium">
+                      {winner ? winner.goalPage : room.players.find(p => p.id === socket.id)?.goalPage}
+                    </span>」に到達しました
                   </p>
                 </>
               )}
