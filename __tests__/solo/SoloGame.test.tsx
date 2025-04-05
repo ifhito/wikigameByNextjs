@@ -6,6 +6,36 @@ import '@testing-library/jest-dom';
 // WikipediaAPI呼び出しのモック
 global.fetch = jest.fn();
 
+// AbortControllerとAbortSignalのモック
+class MockAbortController {
+  signal: MockAbortSignal;
+  
+  constructor() {
+    this.signal = {
+      aborted: false,
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+      onabort: null
+    } as unknown as MockAbortSignal;
+  }
+  
+  abort() {
+    this.signal.aborted = true;
+  }
+}
+
+interface MockAbortSignal {
+  aborted: boolean;
+  addEventListener: jest.Mock;
+  removeEventListener: jest.Mock;
+  dispatchEvent: jest.Mock;
+  onabort: null;
+}
+
+// グローバルにモックを適用
+global.AbortController = MockAbortController as unknown as typeof AbortController;
+
 jest.mock('next/navigation', () => ({
   useRouter: () => ({
     push: jest.fn(),
@@ -17,7 +47,8 @@ describe('SoloGame', () => {
     jest.clearAllMocks();
     
     // fetchのデフォルト動作を設定
-    (global.fetch as jest.Mock).mockImplementation((url) => {
+    (global.fetch as jest.Mock).mockImplementation((_url: string, _options?: any) => {
+      const url = _url as string;
       if (url.includes('/api/wikipedia?title=')) {
         // ゴールページ取得の場合はゴールの説明を含める
         const titleParam = new URL(url, 'http://localhost').searchParams.get('title');
@@ -95,7 +126,8 @@ describe('SoloGame', () => {
 
   it('ゴールページに到達すると成功メッセージが表示される', async () => {
     // ゴールページの特別なモックを設定
-    (global.fetch as jest.Mock).mockImplementation((url) => {
+    (global.fetch as jest.Mock).mockImplementation((_url: string, _options?: any) => {
+      const url = _url as string;
       if (url.includes('/api/wikipedia?title=ゴールページ')) {
         return Promise.resolve({
           ok: true,
@@ -176,7 +208,8 @@ describe('SoloGame', () => {
 
   it('リプレイボタンをクリックすると新しいゲームが開始される', async () => {
     // 失敗状態のゲームをセットアップ
-    (global.fetch as jest.Mock).mockImplementation((url) => {
+    (global.fetch as jest.Mock).mockImplementation((_url: string, _options?: any) => {
+      const url = _url as string;
       if (url.includes('/api/wikipedia/random')) {
         return Promise.resolve({
           ok: true,
@@ -234,7 +267,7 @@ describe('SoloGame', () => {
     });
     
     // ランダムページAPIが再度呼び出されることを確認
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/wikipedia/random'));
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/wikipedia/random'), expect.objectContaining({ signal: expect.any(Object) }));
   });
 
   it('目標の説明が表示される', async () => {
@@ -256,7 +289,8 @@ describe('SoloGame', () => {
 
   it('目標の説明が空の場合にプレースホルダーが表示される', async () => {
     // 説明なしのモックを設定
-    (global.fetch as jest.Mock).mockImplementation((url) => {
+    (global.fetch as jest.Mock).mockImplementation((_url: string, _options?: any) => {
+      const url = _url as string;
       if (url.includes('/api/wikipedia?title=')) {
         return Promise.resolve({
           ok: true,
@@ -291,5 +325,23 @@ describe('SoloGame', () => {
     const goalDescription = screen.getByTestId('goal-description');
     expect(goalDescription).toBeInTheDocument();
     expect(goalDescription.textContent).toContain('目標ページに関する情報を読み込み中');
+  });
+
+  it('AbortControllerが正しく動作すること', async () => {
+    // 2回の連続したレンダリングをシミュレート
+    const { unmount } = render(<SoloGame />);
+    unmount();
+    render(<SoloGame />);
+
+    // ゲームが適切にロードされることを確認
+    await waitFor(() => {
+      expect(screen.getByText(/残りクリック回数: 6/)).toBeInTheDocument();
+    });
+
+    // オプションにsignalが含まれていることを確認
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/wikipedia/random'), 
+      expect.objectContaining({ signal: expect.any(Object) })
+    );
   });
 }); 

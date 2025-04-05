@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { WikiSoloPage } from '../components/WikiSoloPage';
 import { Spinner } from '../components/Spinner';
 
@@ -26,12 +26,30 @@ export const SoloGame: React.FC = () => {
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const initializingRef = useRef<boolean>(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // ゲームの初期化
   const initGame = async () => {
+    // 既に初期化中の場合は処理をスキップ
+    if (initializingRef.current) return;
+    
     try {
+      // 進行中のリクエストがあればキャンセル
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      // 新しいAbortControllerを作成
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+      
+      // 初期化中フラグをセット
+      initializingRef.current = true;
       setLoading(true);
-      const response = await fetch('/api/wikipedia/random');
+      
+      // ランダムページの取得
+      const response = await fetch('/api/wikipedia/random', { signal });
       
       if (!response.ok) {
         throw new Error('ゲーム開始に失敗しました');
@@ -40,7 +58,7 @@ export const SoloGame: React.FC = () => {
       const { startPage, goalPage } = await response.json();
       
       // 目標ページの説明を取得
-      const goalDescResponse = await fetch(`/api/wikipedia?title=${encodeURIComponent(goalPage)}`);
+      const goalDescResponse = await fetch(`/api/wikipedia?title=${encodeURIComponent(goalPage)}`, { signal });
       let goalDescription = '';
       
       if (goalDescResponse.ok) {
@@ -59,21 +77,31 @@ export const SoloGame: React.FC = () => {
         }
       }
       
-      setGameState({
-        startPage,
-        goalPage,
-        currentPage: startPage,
-        clicksRemaining: 6,
-        maxClicks: 6,
-        gameStatus: 'playing',
-        visitedPages: [startPage],
-        goalDescription
-      });
-      setError(null);
+      // Abortされていない場合のみ状態を更新
+      if (!signal.aborted) {
+        setGameState({
+          startPage,
+          goalPage,
+          currentPage: startPage,
+          clicksRemaining: 6,
+          maxClicks: 6,
+          gameStatus: 'playing',
+          visitedPages: [startPage],
+          goalDescription
+        });
+        setError(null);
+      }
     } catch (err) {
+      // AbortErrorの場合は無視
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log('リクエストがキャンセルされました');
+        return;
+      }
+      
       console.error('ゲーム初期化エラー:', err);
       setError('ゲームの開始に失敗しました。再読み込みしてください。');
     } finally {
+      initializingRef.current = false;
       setLoading(false);
     }
   };
@@ -81,6 +109,13 @@ export const SoloGame: React.FC = () => {
   // ゲーム開始時に初期化
   useEffect(() => {
     initGame();
+    
+    // クリーンアップ関数
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   // リンクをクリックした時の処理
