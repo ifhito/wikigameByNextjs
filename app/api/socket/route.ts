@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { NextResponse } from 'next/server';
-import { processPageSelection } from '@/app/utils/goal-detector';
+import { processPageSelection } from '../../utils/goal-detector';
 
 // Wikipediaの環境変数を設定
 const WIKIPEDIA_BASE_URL = process.env.WIKIPEDIA_BASE_URL || 'https://ja.wikipedia.org';
