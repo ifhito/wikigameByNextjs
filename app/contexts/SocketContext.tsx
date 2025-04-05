@@ -203,10 +203,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
 
         socketInstance.on('game-finished', ({ room }: { room: Room }) => {
-          console.log('Game finished');
+          console.log('Game finished', room);
           // ゲーム終了時に連続ターンをリセット
           setUseContinuousTurn(false);
           setRoom(room);
+          
+          // 部屋の状態を強制的に終了に設定
+          if (room) {
+            const updatedRoom = {
+              ...room,
+              status: 'finished' as const
+            };
+            setRoom(updatedRoom);
+            console.log('Game status set to finished:', updatedRoom);
+          }
         });
 
         setSocket(socketInstance);
