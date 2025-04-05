@@ -91,13 +91,34 @@ http://localhost:3000
 
 ## デプロイ
 
-Vercel、Railway、DigitalOceanなどのプラットフォームにデプロイできます。WebSocketをサポートするプラットフォームを選択してください。
+Vercel、Railway、Renderなどのプラットフォームにデプロイできます。WebSocketをサポートするプラットフォームを選択してください。
 
-Vercelで簡単にデプロイするには：
+### Vercelでデプロイする方法
 
 1. GitHubリポジトリを連携
 2. 環境変数を設定
 3. デプロイボタンをクリック
+
+### Renderでデプロイする方法
+
+1. Renderアカウントを作成し、ダッシュボードにログイン
+2. 「New Web Service」をクリック
+3. GitHubリポジトリを連携
+4. 以下の設定を行う:
+   - **Name**: 任意のサービス名
+   - **Environment**: Node
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `npm start`
+5. 「Advanced」を開いて環境変数を設定:
+   - `WIKIPEDIA_BASE_URL`
+   - `WIKIPEDIA_API_PATH`
+   - `WIKIPEDIA_REST_API_PATH`
+   - `WIKIPEDIA_RANDOM_PATH`
+   - `NEXT_PUBLIC_SOCKET_URL` = `/`
+   - `NODE_ENV` = `production`
+6. 「Create Web Service」をクリックしてデプロイを開始
+
+Renderは自動的に適切なポートを使用するので、`PORT`環境変数を手動で設定する必要はありません。
 
 ## 遊び方
 
