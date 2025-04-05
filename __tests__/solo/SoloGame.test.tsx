@@ -18,8 +18,20 @@ describe('SoloGame', () => {
     
     // fetchのデフォルト動作を設定
     (global.fetch as jest.Mock).mockImplementation((url) => {
-      if (url.includes('/api/wikipedia')) {
-        // ウィキペディアコンテンツAPIのモック
+      if (url.includes('/api/wikipedia?title=')) {
+        // ゴールページ取得の場合はゴールの説明を含める
+        const titleParam = new URL(url, 'http://localhost').searchParams.get('title');
+        if (titleParam === 'ゴールページ') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              title: 'ゴールページ',
+              content: '<div><p>これはゴールページの説明です。テスト用の説明文です。</p><div>その他の内容</div></div>',
+            }),
+          });
+        }
+        
+        // 通常のウィキペディアコンテンツAPIのモック
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -223,5 +235,61 @@ describe('SoloGame', () => {
     
     // ランダムページAPIが再度呼び出されることを確認
     expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/wikipedia/random'));
+  });
+
+  it('目標の説明が表示される', async () => {
+    render(<SoloGame />);
+    
+    // ゲームがロードされるのを待つ
+    await waitFor(() => {
+      expect(screen.getByText(/残りクリック回数: 6/)).toBeInTheDocument();
+    });
+    
+    // 目標の説明セクションが表示されることを確認
+    expect(screen.getByText(/目標ページの説明:/)).toBeInTheDocument();
+    
+    // 目標の説明コンテンツが表示されることを確認
+    const goalDescription = screen.getByTestId('goal-description');
+    expect(goalDescription).toBeInTheDocument();
+    expect(goalDescription.textContent).toContain('これはゴールページの説明です');
+  });
+
+  it('目標の説明が空の場合にプレースホルダーが表示される', async () => {
+    // 説明なしのモックを設定
+    (global.fetch as jest.Mock).mockImplementation((url) => {
+      if (url.includes('/api/wikipedia?title=')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            title: 'テストページ',
+            content: '<div>説明なし</div>',
+          }),
+        });
+      } else if (url.includes('/api/wikipedia/random')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            startPage: 'スタートページ',
+            goalPage: 'ゴールページ',
+          }),
+        });
+      }
+      return Promise.reject(new Error('Unknown API'));
+    });
+    
+    render(<SoloGame />);
+    
+    // ゲームがロードされるのを待つ
+    await waitFor(() => {
+      expect(screen.getByText(/残りクリック回数: 6/)).toBeInTheDocument();
+    });
+    
+    // 目標の説明セクションが表示されることを確認
+    expect(screen.getByText(/目標ページの説明:/)).toBeInTheDocument();
+    
+    // プレースホルダーが表示されることを確認
+    const goalDescription = screen.getByTestId('goal-description');
+    expect(goalDescription).toBeInTheDocument();
+    expect(goalDescription.textContent).toContain('目標ページに関する情報を読み込み中');
   });
 }); 
