@@ -10,7 +10,7 @@ interface GameRoomProps {
 }
 
 export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
-  const { socket, room, startGame } = useSocket();
+  const { socket, room, startGame, useContinuousTurn, toggleContinuousTurn } = useSocket();
   const [copied, setCopied] = React.useState(false);
 
   if (!socket || !room) {
@@ -33,6 +33,14 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
     } catch (err) {
       console.error('クリップボードへのコピーに失敗しました', err);
     }
+  };
+
+  const getCurrentPlayerTurnsLeft = () => {
+    if (room && isPlaying && isCurrentPlayerTurn && room.currentPlayerIndex !== undefined) {
+      const currentPlayer = room.players[room.currentPlayerIndex];
+      return currentPlayer?.consecutiveTurnsLeft || 0;
+    }
+    return 0;
   };
 
   return (
@@ -118,6 +126,25 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
                 </button>
               </div>
             )}
+            
+            {/* 自分の番かつゲーム進行中かつ連続ターンが残っている場合に連続ターン設定を表示 */}
+            {isPlaying && isCurrentPlayerTurn && getCurrentPlayerTurnsLeft() > 0 && (
+              <div className="mt-4 border-t pt-4">
+                <h3 className="text-md font-semibold mb-2 text-gray-800">連続ターン設定</h3>
+                
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={useContinuousTurn}
+                    onChange={toggleContinuousTurn}
+                    className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-800">
+                    次の手番も自分の手番にする（残り{getCurrentPlayerTurnsLeft()}回）
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
         </div>
 
@@ -132,7 +159,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
           )}
 
           {isPlaying && room.currentPage && (
-            <WikipediaPage title={room.currentPage} isCurrentPlayer={isCurrentPlayerTurn} />
+            <WikipediaPage pageName={room.currentPage} />
           )}
 
           {isFinished && (

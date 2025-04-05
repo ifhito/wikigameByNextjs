@@ -67,6 +67,7 @@ export default function Home() {
           <ul className="list-disc list-inside text-gray-700 text-sm">
             <li>ゲーム開始時にランダムな出発点と目標ページが設定されます</li>
             <li>プレイヤーは交互にリンクをクリックして次の記事に移動できます</li>
+            <li>連続ターン設定を使えば、3回まで連続でページを移動できます</li>
             <li>自分のゴールページに最初に到達したプレイヤーが勝者です</li>
             <li>「部屋ID」を友達と共有して一緒に遊ぼう！</li>
           </ul>

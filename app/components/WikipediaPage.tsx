@@ -1,142 +1,195 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useSocket } from '../contexts/SocketContext';
+import { Spinner } from './Spinner';
 
 interface WikipediaPageProps {
-  title: string;
-  isCurrentPlayer: boolean;
+  pageName: string;
 }
 
-interface WikipediaData {
-  title: string;
-  content: string;
-  links: { title: string; ns: number }[];
-}
-
-export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPlayer }) => {
-  const { selectPage, canUseContinuousTurn, room } = useSocket();
-  const [loading, setLoading] = useState<boolean>(true);
-  const [data, setData] = useState<WikipediaData | null>(null);
+export function WikipediaPage({ pageName }: WikipediaPageProps) {
+  const [content, setContent] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useContinuousTurn, setUseContinuousTurn] = useState<boolean>(false);
+  const { selectPage } = useSocket();
 
-  // 現在のプレイヤーの連続ターン残り回数を取得
-  const currentPlayerTurnsLeft = room && room.currentPlayerIndex !== undefined && 
-    room.players[room.currentPlayerIndex]?.consecutiveTurnsLeft || 0;
+  // メモ化されたページ選択ハンドラー
+  const handlePageSelect = useCallback((newPageName: string) => {
+    try {
+      console.log('Selecting page:', newPageName);
+      selectPage(newPageName);
+    } catch (err) {
+      console.error('Error selecting page:', err);
+      setError('ページ選択中にエラーが発生しました。再読み込みしてください。');
+    }
+  }, [selectPage]);
 
   useEffect(() => {
-    if (!title) return;
-
-    setLoading(true);
-    setError(null);
-
-    // Wikipediaのデータを取得
-    const fetchWikipediaData = async () => {
+    const fetchContent = async () => {
+      if (!pageName) return;
+      
+      setIsLoading(true);
+      setError(null);
+      
       try {
-        const response = await fetch(`/api/wikipedia?title=${encodeURIComponent(title)}`);
+        // タイトルを正しくエンコードしてAPIにリクエストする
+        const encodedTitle = encodeURIComponent(pageName);
+        console.log(`Fetching Wikipedia content for: ${pageName} (encoded: ${encodedTitle})`);
+        
+        const response = await fetch(`/api/wikipedia?title=${encodedTitle}`);
         
         if (!response.ok) {
-          throw new Error('ページの取得に失敗しました');
+          const errorText = await response.text();
+          console.error(`API Error (${response.status}):`, errorText);
+          throw new Error(`ページ取得に失敗しました (${response.status})`);
         }
         
         const data = await response.json();
-        setData(data);
-      } catch (error) {
-        console.error('Error fetching Wikipedia page:', error);
-        setError('ページの取得に失敗しました');
+        
+        if (!data.content) {
+          console.error('API response has no content:', data);
+          throw new Error('コンテンツが取得できませんでした');
+        }
+        
+        setContent(data.content);
+        console.log('Wikipedia content loaded successfully');
+      } catch (err) {
+        console.error('Error fetching Wikipedia content:', err);
+        setError('コンテンツの取得中にエラーが発生しました。');
       } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     };
 
-    fetchWikipediaData();
-  }, [title]);
+    fetchContent();
+  }, [pageName]);
 
-  // WikipediaのHTMLをレンダリングする際に、リンクのクリック処理を追加
   useEffect(() => {
-    if (!data) return;
+    if (!content) return;
 
+    console.log('Rendering Wikipedia content to DOM');
+    
+    // コンテンツがロードされたらリンクにイベントリスナーを追加
     const contentDiv = document.getElementById('wikipedia-content');
-    if (!contentDiv) return;
+    if (!contentDiv) {
+      console.error('wikipedia-content element not found in the DOM');
+      return;
+    }
 
-    // Wikipediaコンテンツのテキストカラーを調整
-    contentDiv.classList.add('text-gray-900');
+    // 既存のコンテンツをクリア
+    contentDiv.innerHTML = content;
 
-    // リンクの処理を追加
+    // 画像をクリックできないようにする
+    const images = contentDiv.querySelectorAll('img');
+    images.forEach((img) => {
+      img.style.pointerEvents = 'none';
+      img.classList.add('cursor-not-allowed');
+    });
+
+    // すべてのイベントリスナーを保存するための配列
+    const eventCleanups: Array<() => void> = [];
+
+    // ウィキペディア内部リンクにクリックイベントを追加
     const links = contentDiv.querySelectorAll('a');
     links.forEach((link) => {
-      // リンクがwikipedia内のリンクかどうかを確認
-      if (link.getAttribute('href')?.startsWith('/wiki/')) {
-        // 自分の番の時だけリンクをクリック可能に
-        if (isCurrentPlayer) {
-          link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const pageName = link.getAttribute('title') || link.textContent;
-            if (pageName) {
-              selectPage(pageName, useContinuousTurn);
-            }
-          });
-          
-          // リンクのスタイルを通常のリンクに
-          link.classList.add('text-blue-600', 'cursor-pointer', 'hover:underline');
-        } else {
-          // 他プレイヤーの番の時はリンクを非活性化
-          link.classList.add('text-blue-400', 'cursor-not-allowed');
-          link.style.pointerEvents = 'none';
-        }
-      } else {
-        // 外部リンクは常に無効
+      // 外部リンクの場合はイベントを追加しない
+      if (link.getAttribute('href')?.startsWith('http')) {
+        const handlePreventDefault = (e: Event) => {
+          e.preventDefault();
+        };
+        link.addEventListener('click', handlePreventDefault);
+        eventCleanups.push(() => link.removeEventListener('click', handlePreventDefault));
         link.classList.add('text-gray-400', 'cursor-not-allowed');
-        link.style.pointerEvents = 'none';
+        return;
       }
+      
+      // 内部リンクの場合は新しいページへのリンクとして処理
+      const handleInternalLink = (e: Event) => {
+        e.preventDefault();
+        
+        // href属性からページ名を取得
+        const href = link.getAttribute('href');
+        if (!href) return;
+        
+        // ページ名の抽出
+        let newPageName = href;
+        if (href.startsWith('/wiki/')) {
+          newPageName = href.substring(6);
+        }
+        
+        // URLエンコードされているのでデコード
+        newPageName = decodeURIComponent(newPageName);
+        
+        // 特殊ページやカテゴリページはスキップ
+        if (
+          newPageName.startsWith('Special:') ||
+          newPageName.startsWith('Category:') ||
+          newPageName.startsWith('Help:') ||
+          newPageName.startsWith('Wikipedia:') ||
+          newPageName.startsWith('Talk:') ||
+          newPageName.startsWith('User:') ||
+          newPageName.startsWith('Template:') ||
+          newPageName.startsWith('File:') ||
+          newPageName.includes(':')
+        ) {
+          return;
+        }
+        
+        console.log('Navigating to Wikipedia page:', newPageName);
+        // ページ選択
+        handlePageSelect(newPageName);
+      };
+      
+      link.addEventListener('click', handleInternalLink);
+      eventCleanups.push(() => link.removeEventListener('click', handleInternalLink));
+      
+      // スタイル調整
+      link.classList.add('text-blue-500', 'hover:underline');
     });
-  }, [data, isCurrentPlayer, selectPage, useContinuousTurn]);
+    
+    // 目次のトグル処理
+    const tocToggle = contentDiv.querySelector('.toctoggle');
+    if (tocToggle) {
+      const handleTocToggle = (e: Event) => {
+        e.preventDefault();
+        const toc = contentDiv.querySelector('.toc');
+        if (toc) {
+          toc.classList.toggle('hidden');
+        }
+      };
+      
+      tocToggle.addEventListener('click', handleTocToggle);
+      eventCleanups.push(() => tocToggle.removeEventListener('click', handleTocToggle));
+    }
+    
+    // クリーンアップ関数
+    return () => {
+      console.log('Cleaning up Wikipedia content event listeners');
+      eventCleanups.forEach(cleanup => cleanup());
+    };
+    
+  }, [content, handlePageSelect]);
 
-  if (loading) {
-    return <div className="p-4 text-center text-gray-800">ページを読み込み中...</div>;
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-96">
+        <Spinner />
+      </div>
+    );
   }
 
-  if (error || !data) {
-    return <div className="p-4 text-center text-red-500">エラー: {error || 'ページが見つかりません'}</div>;
+  if (error) {
+    return (
+      <div className="p-4 border border-red-300 bg-red-50 text-red-700 rounded">
+        <p>{error}</p>
+      </div>
+    );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 overflow-auto max-h-[calc(100vh-200px)]">
-      {/* ヘッダー部分（タイトルと連続ターンボタン） */}
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold text-gray-900">{data.title}</h1>
-        
-        {/* 自分の番かつ連続ターンが使用可能な時にのみ表示 */}
-        {isCurrentPlayer && canUseContinuousTurn && (
-          <div className="flex items-center">
-            <button
-              onClick={() => setUseContinuousTurn(!useContinuousTurn)}
-              className={`px-3 py-1 rounded-md text-sm font-medium shadow-sm transition-colors flex items-center ${
-                useContinuousTurn 
-                  ? 'bg-green-600 text-white hover:bg-green-700' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <span className="mr-2">{useContinuousTurn ? '連続ターン：ON' : '連続ターン：OFF'}</span>
-              <span className="text-xs bg-white bg-opacity-20 rounded-full px-2 py-0.5">残り{currentPlayerTurnsLeft}回</span>
-            </button>
-          </div>
-        )}
-      </div>
-      
-      {/* 他プレイヤーの番の時は通知を表示 */}
-      {!isCurrentPlayer && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-          <p className="text-blue-800 font-medium">他のプレイヤーの番です。あなたの番になるまでお待ちください。</p>
-        </div>
-      )}
-      
-      <div 
-        id="wikipedia-content"
-        className="prose max-w-none text-gray-900"
-        dangerouslySetInnerHTML={{ __html: data.content }}
-      />
+    <div className="wikipedia-container p-4 bg-white rounded shadow overflow-y-auto max-h-[calc(100vh-200px)]">
+      <div id="wikipedia-content" className="wikipedia-content prose max-w-none" />
     </div>
   );
-}; 
+} 

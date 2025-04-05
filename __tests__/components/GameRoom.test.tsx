@@ -38,8 +38,8 @@ describe('GameRoom', () => {
     id: 'test-room-id',
     creator: 'creator-id',
     players: [
-      { id: 'player1', name: 'Player 1', goalPage: '', isReady: true, isWinner: false },
-      { id: 'player2', name: 'Player 2', goalPage: '', isReady: true, isWinner: false }
+      { id: 'player1', name: 'Player 1', goalPage: '', isReady: true, isWinner: false, consecutiveTurnsLeft: 3 },
+      { id: 'player2', name: 'Player 2', goalPage: '', isReady: true, isWinner: false, consecutiveTurnsLeft: 3 }
     ],
     status: 'waiting',
     currentPage: '',
@@ -128,7 +128,7 @@ describe('GameRoom', () => {
     // プレイヤーが1人のルームにする
     const singlePlayerRoom = {
       ...mockRoom,
-      players: [{ id: 'player1', name: 'Player 1', goalPage: '', isReady: true, isWinner: false }]
+      players: [{ id: 'player1', name: 'Player 1', goalPage: '', isReady: true, isWinner: false, consecutiveTurnsLeft: 3 }]
     };
     
     // クリエイターとしてログイン
@@ -147,5 +147,83 @@ describe('GameRoom', () => {
     // ボタンが無効化されていることを確認
     const startButton = screen.getByText('ゲーム開始');
     expect(startButton).toBeDisabled();
+  });
+
+  test('プレイ中かつ自分のターンで連続ターンが残っている場合に連続ターン設定が表示されること', () => {
+    // プレイ中のルーム
+    const playingRoom = {
+      ...mockRoom,
+      status: 'playing',
+      currentPage: 'テストページ',
+      currentPlayerIndex: 0
+    };
+
+    // 自分のターンとして設定
+    (useSocket as jest.Mock).mockReturnValue({
+      socket: { id: 'player1' },
+      room: playingRoom,
+      startGame: mockStartGame,
+      useContinuousTurn: false,
+      toggleContinuousTurn: jest.fn()
+    });
+
+    render(<GameRoom roomId="test-room-id" />);
+    
+    // 連続ターン設定が表示されていることを確認
+    expect(screen.getByText('連続ターン設定')).toBeInTheDocument();
+    expect(screen.getByText(/次の手番も自分の手番にする/)).toBeInTheDocument();
+    expect(screen.getByText(/残り3回/)).toBeInTheDocument();
+  });
+
+  test('プレイ中だが連続ターンが残っていない場合、連続ターン設定が表示されないこと', () => {
+    // 連続ターンが残っていないプレイヤーのルーム
+    const noTurnsRoom = {
+      ...mockRoom,
+      status: 'playing',
+      currentPage: 'テストページ',
+      currentPlayerIndex: 0,
+      players: [
+        { id: 'player1', name: 'Player 1', goalPage: '', isReady: true, isWinner: false, consecutiveTurnsLeft: 0 },
+        { id: 'player2', name: 'Player 2', goalPage: '', isReady: true, isWinner: false, consecutiveTurnsLeft: 3 }
+      ]
+    };
+
+    // 自分のターンとして設定
+    (useSocket as jest.Mock).mockReturnValue({
+      socket: { id: 'player1' },
+      room: noTurnsRoom,
+      startGame: mockStartGame,
+      useContinuousTurn: false,
+      toggleContinuousTurn: jest.fn()
+    });
+
+    render(<GameRoom roomId="test-room-id" />);
+    
+    // 連続ターン設定が表示されていないことを確認
+    expect(screen.queryByText('連続ターン設定')).not.toBeInTheDocument();
+  });
+
+  test('他のプレイヤーのターンでは連続ターン設定が表示されないこと', () => {
+    // プレイ中のルームで、player2のターン
+    const otherPlayerTurnRoom = {
+      ...mockRoom,
+      status: 'playing',
+      currentPage: 'テストページ',
+      currentPlayerIndex: 1
+    };
+
+    // player1としてログイン
+    (useSocket as jest.Mock).mockReturnValue({
+      socket: { id: 'player1' },
+      room: otherPlayerTurnRoom,
+      startGame: mockStartGame,
+      useContinuousTurn: false,
+      toggleContinuousTurn: jest.fn()
+    });
+
+    render(<GameRoom roomId="test-room-id" />);
+    
+    // 連続ターン設定が表示されていないことを確認
+    expect(screen.queryByText('連続ターン設定')).not.toBeInTheDocument();
   });
 }); 

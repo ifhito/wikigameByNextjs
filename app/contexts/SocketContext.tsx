@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 // ソケットコンテキストの型定義
@@ -11,12 +11,13 @@ interface SocketContextType {
   room: Room | null;
   playerName: string;
   connectionError: string | null;
-  canUseContinuousTurn: boolean; // 連続ターンが使えるかどうか
   createRoom: (playerName: string) => void;
   joinRoom: (roomId: string, playerName: string) => void;
   startGame: () => void;
-  selectPage: (pageName: string, useContinuousTurn?: boolean) => void; // 連続ターン引数を追加
+  selectPage: (pageName: string, useContinuousTurn?: boolean) => void;
   setPlayerName: (name: string) => void;
+  useContinuousTurn: boolean;
+  toggleContinuousTurn: () => void;
 }
 
 // プレイヤーの型定義
@@ -49,12 +50,13 @@ const defaultContextValue: SocketContextType = {
   room: null,
   playerName: '',
   connectionError: null,
-  canUseContinuousTurn: false,
   createRoom: () => {},
   joinRoom: () => {},
   startGame: () => {},
   selectPage: () => {},
   setPlayerName: () => {},
+  useContinuousTurn: false,
+  toggleContinuousTurn: () => {},
 };
 
 // ソケットコンテキストの作成
@@ -68,49 +70,70 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [room, setRoom] = useState<Room | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [canUseContinuousTurn, setCanUseContinuousTurn] = useState<boolean>(false);
+  const [useContinuousTurn, setUseContinuousTurn] = useState<boolean>(false);
+  const socketRef = useRef<Socket | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 連続ターンの切り替え
+  const toggleContinuousTurn = () => {
+    setUseContinuousTurn(!useContinuousTurn);
+  };
+
+  // タイムアウトとリソースをクリーンアップする関数
+  const cleanupResources = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
 
   // ソケット初期化
   useEffect(() => {
     // サーバー起動を確認
     fetch('/api/socket')
-      .then((response) => response.text())
-      .then((text) => {
-        console.log('Socket API response:', text);
+      .then((response) => response.json())
+      .then((data) => {
+        console.log('Socket API response:', data);
+        
+        if (data.status !== 'ok') {
+          throw new Error(data.message || 'Socket APIが正常に応答しませんでした');
+        }
         
         // Socket.IOクライアントの初期化
-        // 環境変数から接続先を取得するか、デフォルト値を使用
-        const socketURL = process.env.NEXT_PUBLIC_SOCKET_URL || 
-          (process.env.NODE_ENV === 'production' 
-            ? window.location.origin 
-            : 'http://localhost:3001');
-        
-        // Socket.IOの設定オプション
         const socketOptions = {
-          // 本番環境の場合はAPIルートのパスを設定
-          ...(process.env.NODE_ENV === 'production' && { 
-            path: '/api/socket/io',
-            transports: ['polling', 'websocket'],
-          }),
+          path: '/api/socket/io',
+          transports: ['polling', 'websocket'],
           autoConnect: true,
           reconnection: true,
-          reconnectionAttempts: 5,
+          reconnectionAttempts: 10,
           reconnectionDelay: 1000,
-          timeout: 20000,
+          timeout: 30000,
         };
           
-        console.log('Connecting to Socket.IO server at:', socketURL, socketOptions);
-        const socketInstance = io(socketURL, socketOptions);
+        console.log('Connecting to Socket.IO server with options:', socketOptions);
+        const socketInstance = io(window.location.origin, socketOptions);
+        socketRef.current = socketInstance;
+
+        // 接続タイムアウト処理
+        timeoutRef.current = setTimeout(() => {
+          if (socketInstance && !socketInstance.connected) {
+            console.error('Socket.IO connection timeout');
+            setConnectionError('サーバー接続タイムアウト: 接続に時間がかかりすぎています');
+            cleanupResources();
+          }
+        }, 10000);
 
         socketInstance.on('connect', () => {
           console.log('Connected to socket server with ID:', socketInstance.id);
           setIsConnected(true);
           setConnectionError(null);
+          cleanupResources();
         });
 
         socketInstance.on('connect_error', (err) => {
           console.error('Socket connection error:', err, err.message);
           setConnectionError(`サーバー接続エラー: ${err.message}`);
+          cleanupResources();
         });
 
         socketInstance.on('disconnect', () => {
@@ -146,32 +169,75 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setRoom(room);
         });
 
+        socketInstance.on('room-updated', ({ room }: { room: Room }) => {
+          console.log('Room updated');
+          
+          // 新しいターンが自分の番でない場合は連続ターンをリセット
+          if (room.currentPlayerIndex !== undefined && 
+              socketInstance.id !== room.players[room.currentPlayerIndex]?.id) {
+            setUseContinuousTurn(false);
+          }
+          
+          setRoom(room);
+        });
+
         socketInstance.on('game-started', ({ room }: { room: Room }) => {
           console.log('Game started');
           setRoom(room);
         });
 
-        socketInstance.on('page-selected', ({ room, canUseContinuousTurn }: { room: Room, canUseContinuousTurn?: boolean }) => {
+        socketInstance.on('page-selected', ({ room }: { room: Room }) => {
           console.log('Page selected');
-          setRoom(room);
-          // 連続ターンが使用可能かどうかを更新
-          setCanUseContinuousTurn(canUseContinuousTurn || false);
+          
+          try {
+            // 新しいターンが自分の番でない場合は連続ターンをリセット
+            if (room.currentPlayerIndex !== undefined && 
+                socketInstance.id !== room.players[room.currentPlayerIndex]?.id) {
+              setUseContinuousTurn(false);
+            }
+            
+            setRoom(room);
+          } catch (error) {
+            console.error('Error handling page-selected event:', error);
+          }
         });
 
         socketInstance.on('game-finished', ({ room }: { room: Room }) => {
           console.log('Game finished');
+          // ゲーム終了時に連続ターンをリセット
+          setUseContinuousTurn(false);
           setRoom(room);
         });
 
         setSocket(socketInstance);
 
         return () => {
-          socketInstance.disconnect();
+          cleanupResources();
+          if (socketInstance) {
+            console.log('Cleaning up socket connection...');
+            // すべてのイベントリスナーを削除
+            socketInstance.off('connect');
+            socketInstance.off('connect_error');
+            socketInstance.off('disconnect');
+            socketInstance.off('error');
+            socketInstance.off('room-created');
+            socketInstance.off('room-joined');
+            socketInstance.off('player-joined');
+            socketInstance.off('player-left');
+            socketInstance.off('room-updated');
+            socketInstance.off('game-started');
+            socketInstance.off('page-selected');
+            socketInstance.off('game-finished');
+            
+            socketInstance.disconnect();
+            socketRef.current = null;
+          }
         };
       })
       .catch((error) => {
         console.error('Failed to connect to socket server:', error);
-        setConnectionError('サーバーに接続できませんでした');
+        setConnectionError(`サーバーに接続できませんでした: ${error.message}`);
+        cleanupResources();
       });
   }, []);
 
@@ -203,7 +269,6 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }, 3000);
 
-      // クリーンアップ関数を返して、コンポーネントがアンマウントされた場合やroomIdが設定された場合にタイマーをクリア
       return () => clearTimeout(joinTimeout);
     } else {
       console.error('Socket not connected when trying to join room');
@@ -223,10 +288,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   // ページ選択
-  const selectPage = (pageName: string, useContinuousTurn: boolean = false) => {
+  const selectPage = (pageName: string, useContinuousTurnOverride: boolean = useContinuousTurn) => {
     if (socket && roomId) {
-      console.log('Selecting page:', pageName, 'in room:', roomId, useContinuousTurn ? 'with continuous turn' : '');
-      socket.emit('select-page', { roomId, pageName, useContinuousTurn });
+      console.log('Selecting page:', pageName, 'in room:', roomId, useContinuousTurnOverride ? 'with continuous turn' : '');
+      try {
+        socket.emit('select-page', { roomId, pageName, useContinuousTurn: useContinuousTurnOverride });
+      } catch (error) {
+        console.error('Error selecting page:', error);
+        setConnectionError('ページ選択中にエラーが発生しました。再読み込みしてください。');
+      }
     } else {
       console.error('Socket not connected or room ID not set when trying to select page');
       setConnectionError('ページを選択できません。再読み込みしてください。');
@@ -241,12 +311,13 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     room,
     playerName,
     connectionError,
-    canUseContinuousTurn,
     createRoom,
     joinRoom,
     startGame,
     selectPage,
     setPlayerName,
+    useContinuousTurn,
+    toggleContinuousTurn,
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
