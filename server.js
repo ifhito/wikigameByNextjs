@@ -1,38 +1,103 @@
-import { Server as SocketIOServer, ServerOptions } from 'socket.io';
-import { processPageSelection } from '../../../utils/goal-detector';
-import { createServer, Server as HTTPServer } from 'http';
+// @ts-check
+
+import { createServer } from "node:http";
+import next from "next";
+import { Server } from "socket.io";
+
+// ゴール検出ロジックのインポート（ローカル実装として処理）
+const normalizePageName = (pageName) => {
+  return pageName
+    .toLowerCase()
+    .replace(/[_\s]/g, '') // アンダースコアと空白を削除
+    .replace(/[（(]/g, '') // 左括弧を削除
+    .replace(/[）)]/g, '') // 右括弧を削除
+    .normalize('NFKC'); // 全角・半角を統一
+};
+
+/**
+ * ページ選択時のゴール判定を行う関数
+ */
+const checkGoal = (room, pageName) => {
+  // ページ名を正規化
+  const normalizedSelectedPage = normalizePageName(pageName);
+  
+  // ゴールチェック - 誰かのゴールページに到達したかを判定
+  let goalPlayer = null;
+  const isGoal = room.players.some(player => {
+    // ゴールページ名も正規化して比較
+    const normalizedGoalPage = normalizePageName(player.goalPage);
+    
+    if (normalizedGoalPage === normalizedSelectedPage) {
+      goalPlayer = player;
+      console.log(`ゴール一致: 選択="${pageName}"(正規化="${normalizedSelectedPage}"), 目標="${player.goalPage}"(正規化="${normalizedGoalPage}")`);
+      return true;
+    }
+    return false;
+  });
+
+  // 次のプレイヤーインデックスを計算 (ゴールでない場合に使用)
+  const nextPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
+
+  return {
+    isGoal,
+    goalPlayer,
+    nextPlayerIndex
+  };
+};
+
+/**
+ * 勝者を設定する関数
+ */
+const setWinner = (room, goalPlayerId) => {
+  room.players.forEach(player => {
+    player.isWinner = player.id === goalPlayerId;
+  });
+  room.status = 'finished';
+};
+
+/**
+ * ゴール判定と状態更新を一括で行う関数
+ */
+const processPageSelection = (room, pageName, socketId) => {
+  // 現在のプレイヤーかどうかチェック
+  const currentPlayer = room.players[room.currentPlayerIndex];
+  if (currentPlayer.id !== socketId) {
+    return { 
+      success: false, 
+      isGoal: false, 
+      goalPlayer: null,
+      message: 'あなたの番ではありません' 
+    };
+  }
+
+  // ページを更新
+  room.currentPage = pageName;
+
+  // ゴールチェック
+  const { isGoal, goalPlayer, nextPlayerIndex } = checkGoal(room, pageName);
+
+  if (isGoal && goalPlayer) {
+    // 勝者設定
+    setWinner(room, goalPlayer.id);
+    console.log(`ゴール判定: ${goalPlayer.name}(${goalPlayer.id}) が勝者になりました。ゴールページ: ${goalPlayer.goalPage}`);
+    return { 
+      success: true, 
+      isGoal: true, 
+      goalPlayer 
+    };
+  } else {
+    // 次のプレイヤーへ
+    room.currentPlayerIndex = nextPlayerIndex;
+    return { 
+      success: true, 
+      isGoal: false, 
+      goalPlayer: null 
+    };
+  }
+};
 
 // 型定義
-interface Player {
-  id: string;
-  name: string;
-  goalPage: string;
-  goalDescription?: string;
-  isReady: boolean;
-  isWinner: boolean;
-}
-
-interface Room {
-  id: string;
-  creator: string;
-  players: Player[];
-  status: 'waiting' | 'playing' | 'finished';
-  currentPage: string;
-  startingPage: string;
-  currentPlayerIndex: number;
-}
-
-interface WikipediaPageInfo {
-  title: string;
-  description: string;
-}
-
-// Socket.IOのTransport型
-type Transport = 'polling' | 'websocket';
-
-// グローバルな変数
-let io: SocketIOServer | null = null;
-const rooms: Record<string, Room> = {};
+const rooms = {};
 const MAX_PLAYERS = 4;
 
 // Wikipediaの環境変数設定
@@ -41,7 +106,7 @@ const WIKIPEDIA_REST_API_PATH = process.env.WIKIPEDIA_REST_API_PATH || '/api/res
 const WIKIPEDIA_RANDOM_PATH = process.env.WIKIPEDIA_RANDOM_PATH || '/wiki/Special:Random';
 
 // ランダムなWikipediaページを取得する関数
-async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
+async function getRandomWikipediaPage() {
   try {
     // まずランダムなページを取得
     const response = await fetch(`${WIKIPEDIA_BASE_URL}${WIKIPEDIA_RANDOM_PATH}`);
@@ -69,51 +134,23 @@ async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
   }
 }
 
-// Socket.IOサーバーのセットアップ
-export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOServer {
-  if (io) return io;
+const dev = process.env.NODE_ENV !== "production";
+const hostname = "localhost";
+const port = 3000;
+// when using middleware `hostname` and `port` must be provided below
+const app = next({ dev, hostname, port });
+const handler = app.getRequestHandler();
 
-  // 設定オプション
-  const options: Partial<ServerOptions> = {
-    cors: {
-      origin: '*',
-      methods: ['GET', 'POST'],
-    },
-    path: '/socket.io', // Next.jsのAPI Routes環境では/socket.ioパスを使用する必要がある
-    transports: ['polling', 'websocket'] as Transport[],
-    allowEIO3: true,
-    pingTimeout: 30000,
-    pingInterval: 25000,
-  };
+app.prepare().then(() => {
+  const httpServer = createServer(handler);
 
-  // HTTPサーバーが提供されている場合は、それを使用
-  if (httpServer) {
-    console.log('Setting up Socket.IO with provided HTTP server');
-    io = new SocketIOServer(httpServer, options);
-  } else {
-    // スタンドアロンモード - Next.jsの開発環境ではHTTPサーバーを作成
-    console.log('Setting up standalone Socket.IO server');
-    
-    // 開発環境でHTTPサーバーを作成
-    if (process.env.NODE_ENV === 'development') {
-      const httpServer = createServer();
-      io = new SocketIOServer(httpServer, options);
-      
-      const port = parseInt(process.env.SOCKET_PORT || '3001', 10);
-      httpServer.listen(port);
-      console.log(`Socket.IO server listening on port ${port} (development mode)`);
-    } else {
-      // 本番環境ではオプションのみでSocket.IOを初期化
-      io = new SocketIOServer(options);
-    }
-  }
+  const io = new Server(httpServer);
 
-  // Socket.IOの接続イベント
-  io.on('connection', (socket) => {
+  io.on("connection", (socket) => {
     console.log('New client connected', socket.id);
     
     // 部屋を作成
-    socket.on('create-room', async ({ playerName }: { playerName: string }) => {
+    socket.on('create-room', async ({ playerName }) => {
       // ランダムな部屋IDを生成
       const roomId = Math.random().toString(36).substring(2, 8);
       
@@ -121,7 +158,7 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
       const goalPageInfo = await getRandomWikipediaPage();
       
       // 部屋を作成
-      const room: Room = {
+      const room = {
         id: roomId,
         creator: socket.id,
         players: [
@@ -146,7 +183,7 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
     });
 
     // 部屋に参加
-    socket.on('join-room', async ({ roomId, playerName }: { roomId: string; playerName: string }) => {
+    socket.on('join-room', async ({ roomId, playerName }) => {
       console.log(`参加リクエスト: プレイヤー「${playerName}」が部屋「${roomId}」に参加しようとしています`);
       console.log(`現在の部屋一覧:`, Object.keys(rooms));
       
@@ -174,7 +211,7 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
       // ランダムなゴールページを取得
       const goalPageInfo = await getRandomWikipediaPage();
 
-      const player: Player = {
+      const player = {
         id: socket.id,
         name: playerName,
         goalPage: goalPageInfo.title,
@@ -187,11 +224,11 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
       socket.join(roomId);
       console.log(`成功: プレイヤー「${playerName}」が部屋「${roomId}」に参加しました`);
       socket.emit('room-joined', { roomId, room });
-      io!.to(roomId).emit('player-joined', { room });
+      io.to(roomId).emit('player-joined', { room });
     });
 
     // ゲーム開始
-    socket.on('start-game', async ({ roomId }: { roomId: string }) => {
+    socket.on('start-game', async ({ roomId }) => {
       const room = rooms[roomId];
 
       if (!room) {
@@ -238,11 +275,11 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
       room.status = 'playing';
       room.currentPlayerIndex = 0;
 
-      io!.to(roomId).emit('game-started', { room });
+      io.to(roomId).emit('game-started', { room });
     });
 
     // プレイヤーがページを選択
-    socket.on('select-page', async ({ roomId, pageName }: { roomId: string; pageName: string }) => {
+    socket.on('select-page', async ({ roomId, pageName }) => {
       console.log(`ページ選択: ${socket.id} が ${pageName} を選択しました (部屋: ${roomId})`);
       const room = rooms[roomId];
 
@@ -266,10 +303,10 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
 
       if (result.isGoal && result.goalPlayer) {
         console.log(`ゴール検知: ${result.goalPlayer.name} が勝利しました！ゴールページ: ${result.goalPlayer.goalPage}`);
-        io!.to(roomId).emit('game-finished', { room, winner: result.goalPlayer });
+        io.to(roomId).emit('game-finished', { room, winner: result.goalPlayer });
       } else {
         console.log(`次のプレイヤーへ: プレイヤーインデックス ${room.currentPlayerIndex}`);
-        io!.to(roomId).emit('page-selected', { room });
+        io.to(roomId).emit('page-selected', { room });
       }
     });
 
@@ -304,11 +341,18 @@ export function setupSocketIO(httpServer: HTTPServer | null = null): SocketIOSer
           }
           
           // 部屋の状態を更新
-          io!.to(roomId).emit('player-left', { room });
+          io.to(roomId).emit('player-left', { room });
         }
       });
     });
   });
 
-  return io;
-} 
+  httpServer
+    .once("error", (err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .listen(port, () => {
+      console.log(`> Ready on http://${hostname}:${port}`);
+    });
+}); 
