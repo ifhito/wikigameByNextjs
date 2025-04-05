@@ -67,6 +67,21 @@ function generateRoomId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
+/**
+ * ページタイトルを正規化する（比較用）
+ * @param {string} title
+ * @returns {string}
+ */
+function normalizePageTitle(title) {
+  if (!title) return '';
+  // 空白を削除し、小文字に変換
+  return title.trim().toLowerCase()
+    // 括弧内の注釈（地名など）を削除
+    .replace(/\s*\([^)]*\)\s*/g, '')
+    // 特殊文字と記号を削除
+    .replace(/[・.,:;'"!?_\-\s]/g, '');
+}
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
@@ -138,7 +153,7 @@ app.prepare().then(() => {
         }
 
         // ゲームが開始されているか確認
-        if (rooms[roomId].status !== 'waiting') {
+        if (rooms[roomId].status !== 'waiting' && rooms[roomId].status !== 'finished') {
           socket.emit('error', { message: 'ゲームはすでに開始されています' });
           return;
         }
@@ -206,7 +221,7 @@ app.prepare().then(() => {
         }
 
         // ゲームが開始されているか確認
-        if (rooms[roomId].status !== 'waiting') {
+        if (rooms[roomId].status !== 'waiting' && rooms[roomId].status !== 'finished') {
           socket.emit('error', { message: 'ゲームはすでに開始されています' });
           return;
         }
@@ -217,14 +232,49 @@ app.prepare().then(() => {
           return;
         }
 
-        // ゲーム開始
-        rooms[roomId].status = 'playing';
-        rooms[roomId].currentPage = rooms[roomId].startingPage;
-        rooms[roomId].currentPlayerIndex = 0;
-
-        // 全プレイヤーに通知
-        io.to(roomId).emit('game-started', { room: rooms[roomId] });
-        console.log(`Game started in room ${roomId}`);
+        // ゲーム再開始時は新しい開始ページと各プレイヤーの目標ページを設定
+        if (rooms[roomId].status === 'finished') {
+          getRandomWikipediaPage().then(startPage => {
+            rooms[roomId].startingPage = startPage.title;
+            
+            // 各プレイヤーに新しいゴールページを設定
+            const goalPromises = rooms[roomId].players.map(player => {
+              return getRandomWikipediaPage().then(goalPage => {
+                player.goalPage = goalPage.title;
+                player.goalDescription = goalPage.description;
+                player.isWinner = false;
+                player.consecutiveTurnsLeft = 3; // 連続ターンをリセット
+                return player;
+              });
+            });
+            
+            Promise.all(goalPromises).then(() => {
+              // ゲーム開始
+              rooms[roomId].status = 'playing';
+              rooms[roomId].currentPage = rooms[roomId].startingPage;
+              rooms[roomId].currentPlayerIndex = 0;
+              
+              // 全プレイヤーに通知
+              io.to(roomId).emit('game-started', { room: rooms[roomId] });
+              console.log(`Game restarted in room ${roomId}`);
+            });
+          });
+        } else {
+          // 通常のゲーム開始
+          rooms[roomId].status = 'playing';
+          rooms[roomId].currentPage = rooms[roomId].startingPage;
+          rooms[roomId].currentPlayerIndex = 0;
+          
+          // 各プレイヤーの状態をリセット
+          rooms[roomId].players.forEach(player => {
+            player.isWinner = false;
+            player.consecutiveTurnsLeft = 3; // 連続ターンをリセット
+          });
+          
+          // 全プレイヤーに通知
+          io.to(roomId).emit('game-started', { room: rooms[roomId] });
+          console.log(`Game started in room ${roomId}`);
+        }
       } catch (error) {
         console.error('Error starting game:', error);
         socket.emit('error', { message: 'ゲームの開始に失敗しました' });
@@ -258,12 +308,18 @@ app.prepare().then(() => {
         // ページを更新
         room.currentPage = pageName;
 
-        // 勝利条件をチェック
+        // 勝利条件をチェック - 正規化したタイトルで比較
         let isGameFinished = false;
-        if (pageName === currentPlayer.goalPage) {
+        const normalizedPageName = normalizePageTitle(pageName);
+        const normalizedGoalPage = normalizePageTitle(currentPlayer.goalPage);
+        
+        console.log(`Comparing pages: "${pageName}" (${normalizedPageName}) with goal "${currentPlayer.goalPage}" (${normalizedGoalPage})`);
+        
+        if (normalizedPageName === normalizedGoalPage || pageName === currentPlayer.goalPage) {
           currentPlayer.isWinner = true;
           room.status = 'finished';
           isGameFinished = true;
+          console.log(`Player ${currentPlayer.name} reached goal page ${pageName}! Game finished.`);
         }
 
         // 連続ターン処理
@@ -276,13 +332,12 @@ app.prepare().then(() => {
         }
 
         // 全プレイヤーに通知
-        io.to(roomId).emit(isGameFinished ? 'game-finished' : 'page-selected', { 
-          room: rooms[roomId]
-        });
-        
-        console.log(`Page selected in room ${roomId}: ${pageName}`);
         if (isGameFinished) {
+          io.to(roomId).emit('game-finished', { room: rooms[roomId] });
           console.log(`Game finished in room ${roomId}. Winner: ${currentPlayer.name}`);
+        } else {
+          io.to(roomId).emit('page-selected', { room: rooms[roomId] });
+          console.log(`Page selected in room ${roomId}: ${pageName}`);
         }
       } catch (error) {
         console.error('Error selecting page:', error);
