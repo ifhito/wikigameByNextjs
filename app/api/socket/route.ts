@@ -76,7 +76,7 @@ async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
 function initSocketServer() {
   if (!io) {
     // Next.js App RouterでのSocket.IOの設定
-    if (!(global as Record<string, any>).io) {
+    if (!(global as Record<string, unknown>).io) {
       console.log('Initializing Socket.IO server');
       
       // Socket.IOサーバーの初期化
@@ -110,7 +110,7 @@ function initSocketServer() {
       }
       
       // Socket.IOインスタンスをグローバルスコープに保存
-      (global as Record<string, any>).io = io;
+      (global as Record<string, unknown>).io = io;
       
       io.on('connection', (socket) => {
         console.log('New client connected', socket.id);
@@ -312,7 +312,7 @@ function initSocketServer() {
       });
     } else {
       // 既存のSocket.IOインスタンスを使用
-      io = (global as Record<string, any>).io;
+      io = (global as Record<string, unknown>).io as Server;
     }
   }
   
