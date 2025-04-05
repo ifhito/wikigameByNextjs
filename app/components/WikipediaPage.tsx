@@ -15,11 +15,15 @@ interface WikipediaData {
 }
 
 export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPlayer }) => {
-  const { selectPage, canUseContinuousTurn } = useSocket();
+  const { selectPage, canUseContinuousTurn, room } = useSocket();
   const [loading, setLoading] = useState<boolean>(true);
   const [data, setData] = useState<WikipediaData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [useContinuousTurn, setUseContinuousTurn] = useState<boolean>(false);
+
+  // 現在のプレイヤーの連続ターン残り回数を取得
+  const currentPlayerTurnsLeft = room && room.currentPlayerIndex !== undefined && 
+    room.players[room.currentPlayerIndex]?.consecutiveTurnsLeft || 0;
 
   useEffect(() => {
     if (!title) return;
@@ -99,33 +103,32 @@ export const WikipediaPage: React.FC<WikipediaPageProps> = ({ title, isCurrentPl
 
   return (
     <div className="bg-white rounded-lg shadow p-4 overflow-auto max-h-[calc(100vh-200px)]">
-      <h1 className="text-2xl font-bold mb-4 text-gray-900">{data.title}</h1>
+      {/* ヘッダー部分（タイトルと連続ターンボタン） */}
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold text-gray-900">{data.title}</h1>
+        
+        {/* 自分の番かつ連続ターンが使用可能な時にのみ表示 */}
+        {isCurrentPlayer && canUseContinuousTurn && (
+          <div className="flex items-center">
+            <button
+              onClick={() => setUseContinuousTurn(!useContinuousTurn)}
+              className={`px-3 py-1 rounded-md text-sm font-medium shadow-sm transition-colors flex items-center ${
+                useContinuousTurn 
+                  ? 'bg-green-600 text-white hover:bg-green-700' 
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <span className="mr-2">{useContinuousTurn ? '連続ターン：ON' : '連続ターン：OFF'}</span>
+              <span className="text-xs bg-white bg-opacity-20 rounded-full px-2 py-0.5">残り{currentPlayerTurnsLeft}回</span>
+            </button>
+          </div>
+        )}
+      </div>
       
       {/* 他プレイヤーの番の時は通知を表示 */}
       {!isCurrentPlayer && (
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
           <p className="text-blue-800 font-medium">他のプレイヤーの番です。あなたの番になるまでお待ちください。</p>
-        </div>
-      )}
-
-      {/* 自分の番かつ連続ターンが使用可能な時にのみ表示 */}
-      {isCurrentPlayer && canUseContinuousTurn && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
-          <div className="flex items-center justify-between">
-            <p className="text-green-800 font-medium">連続ターンを使用できます（最大3回まで）</p>
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="useContinuousTurn"
-                checked={useContinuousTurn}
-                onChange={(e) => setUseContinuousTurn(e.target.checked)}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="useContinuousTurn" className="ml-2 text-sm font-medium text-gray-700">
-                連続ターンを使用する
-              </label>
-            </div>
-          </div>
         </div>
       )}
       

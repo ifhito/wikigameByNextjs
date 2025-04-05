@@ -53,14 +53,6 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - TypeScript
 - Tailwind CSS
 
-## アーキテクチャ
-
-このアプリケーションは、Next.jsとSocket.IOを統合したカスタムサーバーを使用しています。これにより、WebSocketとHTTPリクエストの両方を同じポート上で効率的に処理できます。
-
-- `server.js` - カスタムNode.jsサーバー（Next.jsとSocket.IOのハンドラーを組み合わせた設定）
-- `app/socket.js` - クライアント側のSocket.IOインスタンス
-- `app/contexts/SocketContext.tsx` - Reactコンテキストを使用したSocket.IO機能のラッピング
-
 ## 環境変数の設定
 
 以下の環境変数を設定することができます：
@@ -109,12 +101,11 @@ http://localhost:3000
 
 Vercel、Railway、Renderなどのプラットフォームにデプロイできます。WebSocketをサポートするプラットフォームを選択してください。
 
-### カスタムNode.jsサーバーの注意点
+### Vercelでデプロイする方法
 
-このプロジェクトは標準のNext.jsデプロイと異なり、カスタムサーバー(`server.js`)を使用しています。そのため、デプロイ先のプラットフォームでは以下の点を考慮する必要があります：
-
-1. スタートコマンドが `npm start` であること（内部的には `node server.js` を実行）
-2. WebSocketをサポートしていること
+1. GitHubリポジトリを連携
+2. 環境変数を設定
+3. デプロイボタンをクリック
 
 ### Renderでデプロイする方法
 
@@ -131,20 +122,11 @@ Vercel、Railway、Renderなどのプラットフォームにデプロイでき�
    - `WIKIPEDIA_API_PATH`
    - `WIKIPEDIA_REST_API_PATH`
    - `WIKIPEDIA_RANDOM_PATH`
+   - `NEXT_PUBLIC_SOCKET_URL` = `/`
    - `NODE_ENV` = `production`
 6. 「Create Web Service」をクリックしてデプロイを開始
 
 Renderは自動的に適切なポートを使用するので、`PORT`環境変数を手動で設定する必要はありません。
-
-## トラブルシューティング
-
-### WebSocket接続エラー
-
-WebSocketが接続できない場合は、以下を確認してください：
-
-1. サーバーが起動していること（`npm run dev`）
-2. ブラウザのコンソールでエラーメッセージを確認
-3. ファイアウォールがWebSocket接続をブロックしていないこと
 
 ## 遊び方
 

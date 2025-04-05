@@ -1,20 +1,36 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { socket } from '../socket';
-import type { Socket } from 'socket.io-client';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
 
-// Room型とPlayer型の定義
+// ソケットコンテキストの型定義
+interface SocketContextType {
+  socket: Socket | null;
+  isConnected: boolean;
+  roomId: string | null;
+  room: Room | null;
+  playerName: string;
+  connectionError: string | null;
+  canUseContinuousTurn: boolean; // 連続ターンが使えるかどうか
+  createRoom: (playerName: string) => void;
+  joinRoom: (roomId: string, playerName: string) => void;
+  startGame: () => void;
+  selectPage: (pageName: string, useContinuousTurn?: boolean) => void; // 連続ターン引数を追加
+  setPlayerName: (name: string) => void;
+}
+
+// プレイヤーの型定義
 export interface Player {
   id: string;
   name: string;
   goalPage: string;
-  goalDescription?: string;
+  goalDescription?: string; // ゴールページの説明文
   isReady: boolean;
   isWinner: boolean;
-  consecutiveTurnsLeft: number; // 連続ターン残り回数
+  consecutiveTurnsLeft: number; // 連続ターンを必須プロパティにする
 }
 
+// 部屋の型定義
 export interface Room {
   id: string;
   creator: string;
@@ -25,168 +41,143 @@ export interface Room {
   currentPlayerIndex: number;
 }
 
-// コンテキストの型定義
-interface SocketContextType {
-  socket: Socket | null;
-  isConnected: boolean;
-  connectionError: string | null;
-  room: Room | null;
-  roomId: string | null;
-  playerName: string;
-  canUseContinuousTurn: boolean; // 連続ターンが使用可能かどうか
-  createRoom: (playerName: string) => void;
-  joinRoom: (roomId: string, playerName: string) => void;
-  startGame: () => void;
-  selectPage: (pageName: string, useContinuousTurn?: boolean) => void; // 連続ターンフラグを追加
-  setPlayerName: (name: string) => void;
-}
-
-// コンテキストの作成
-const SocketContext = createContext<SocketContextType>({
+// コンテキストの初期値
+const defaultContextValue: SocketContextType = {
   socket: null,
   isConnected: false,
-  connectionError: null,
-  room: null,
   roomId: null,
+  room: null,
   playerName: '',
+  connectionError: null,
   canUseContinuousTurn: false,
   createRoom: () => {},
   joinRoom: () => {},
   startGame: () => {},
   selectPage: () => {},
   setPlayerName: () => {},
-});
+};
 
-// コンテキストを使用するためのフック
-export const useSocket = () => useContext(SocketContext);
+// ソケットコンテキストの作成
+export const SocketContext = createContext<SocketContextType>(defaultContextValue);
 
-// プロバイダーの型定義
-interface SocketProviderProps {
-  children: ReactNode;
-}
-
-// コンテキストプロバイダー
-export const SocketProvider = ({ children }: SocketProviderProps) => {
+// ソケットコンテキストプロバイダー
+export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [room, setRoom] = useState<Room | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [canUseContinuousTurn, setCanUseContinuousTurn] = useState<boolean>(false);
 
+  // ソケット初期化
   useEffect(() => {
-    // Socket.IOの初期状態を確認
-    if (socket.connected) {
-      setIsConnected(true);
-    }
+    // サーバー起動を確認
+    fetch('/api/socket')
+      .then((response) => response.text())
+      .then((text) => {
+        console.log('Socket API response:', text);
+        
+        // Socket.IOクライアントの初期化
+        // 環境変数から接続先を取得するか、デフォルト値を使用
+        const socketURL = process.env.NEXT_PUBLIC_SOCKET_URL || 
+          (process.env.NODE_ENV === 'production' 
+            ? window.location.origin 
+            : 'http://localhost:3001');
+        
+        // Socket.IOの設定オプション
+        const socketOptions = {
+          // 本番環境の場合はAPIルートのパスを設定
+          ...(process.env.NODE_ENV === 'production' && { 
+            path: '/api/socket/io',
+            transports: ['polling', 'websocket'],
+          }),
+          autoConnect: true,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 20000,
+        };
+          
+        console.log('Connecting to Socket.IO server at:', socketURL, socketOptions);
+        const socketInstance = io(socketURL, socketOptions);
 
-    // 接続イベントリスナー
-    function onConnect() {
-      console.log('Socket connected:', socket.id);
-      setIsConnected(true);
-      setConnectionError(null);
-    }
+        socketInstance.on('connect', () => {
+          console.log('Connected to socket server with ID:', socketInstance.id);
+          setIsConnected(true);
+          setConnectionError(null);
+        });
 
-    // 接続エラーイベントリスナー
-    function onConnectError(err: Error) {
-      console.error('Socket connection error:', err);
-      setConnectionError(`Connection error: server error`);
-      setIsConnected(false);
-    }
+        socketInstance.on('connect_error', (err) => {
+          console.error('Socket connection error:', err, err.message);
+          setConnectionError(`サーバー接続エラー: ${err.message}`);
+        });
 
-    // 切断イベントリスナー
-    function onDisconnect(reason: string) {
-      console.log('Socket disconnected:', reason);
-      setIsConnected(false);
-      if (reason === 'io server disconnect') {
-        // サーバー側から強制切断された場合は再接続を試みる
-        socket.connect();
-      }
-    }
+        socketInstance.on('disconnect', () => {
+          console.log('Disconnected from socket server');
+          setIsConnected(false);
+        });
 
-    // エラーイベントリスナー
-    function onError(error: Error | string | { message: string }) {
-      console.error('Socket error:', error);
-      if (typeof error === 'object' && error !== null && 'message' in error) {
-        setConnectionError(`Socket error: ${(error as { message: string }).message}`);
-      } else {
-        setConnectionError('An unknown socket error occurred');
-      }
-      setTimeout(() => setConnectionError(null), 5000);
-    }
+        socketInstance.on('error', ({ message }: { message: string }) => {
+          console.error('Socket error received:', message);
+          setConnectionError(message);
+          setTimeout(() => setConnectionError(null), 5000);
+        });
 
-    // ゲーム関連のイベントハンドラ
-    function onRoomCreated({ roomId, room }: { roomId: string; room: Room }) {
-      console.log('Room created:', roomId);
-      setRoomId(roomId);
-      setRoom(room);
-    }
+        socketInstance.on('room-created', ({ roomId, room }: { roomId: string; room: Room }) => {
+          console.log('Room created:', roomId);
+          setRoomId(roomId);
+          setRoom(room);
+        });
 
-    function onRoomJoined({ roomId, room }: { roomId: string; room: Room }) {
-      console.log('Room joined:', roomId);
-      setRoomId(roomId);
-      setRoom(room);
-    }
+        socketInstance.on('room-joined', ({ roomId, room }: { roomId: string; room: Room }) => {
+          console.log('Room joined:', roomId);
+          setRoomId(roomId);
+          setRoom(room);
+        });
 
-    function onPlayerJoined({ room }: { room: Room }) {
-      console.log('Player joined room');
-      setRoom(room);
-    }
+        socketInstance.on('player-joined', ({ room }: { room: Room }) => {
+          console.log('Player joined room');
+          setRoom(room);
+        });
 
-    function onPlayerLeft({ room }: { room: Room }) {
-      console.log('Player left room');
-      setRoom(room);
-    }
+        socketInstance.on('player-left', ({ room }: { room: Room }) => {
+          console.log('Player left room');
+          setRoom(room);
+        });
 
-    function onGameStarted({ room }: { room: Room }) {
-      console.log('Game started');
-      setRoom(room);
-    }
+        socketInstance.on('game-started', ({ room }: { room: Room }) => {
+          console.log('Game started');
+          setRoom(room);
+        });
 
-    function onPageSelected({ room, canUseContinuousTurn }: { room: Room, canUseContinuousTurn?: boolean }) {
-      console.log('Page selected', canUseContinuousTurn ? 'with continuous turn option' : '');
-      setRoom(room);
-      // 連続ターンが使用可能かどうかの状態を更新
-      setCanUseContinuousTurn(!!canUseContinuousTurn);
-    }
+        socketInstance.on('page-selected', ({ room, canUseContinuousTurn }: { room: Room, canUseContinuousTurn?: boolean }) => {
+          console.log('Page selected');
+          setRoom(room);
+          // 連続ターンが使用可能かどうかを更新
+          setCanUseContinuousTurn(canUseContinuousTurn || false);
+        });
 
-    function onGameFinished({ room }: { room: Room }) {
-      console.log('Game finished');
-      setRoom(room);
-    }
+        socketInstance.on('game-finished', ({ room }: { room: Room }) => {
+          console.log('Game finished');
+          setRoom(room);
+        });
 
-    // イベントリスナーの登録
-    socket.on('connect', onConnect);
-    socket.on('connect_error', onConnectError);
-    socket.on('disconnect', onDisconnect);
-    socket.on('error', onError);
-    socket.on('room-created', onRoomCreated);
-    socket.on('room-joined', onRoomJoined);
-    socket.on('player-joined', onPlayerJoined);
-    socket.on('player-left', onPlayerLeft);
-    socket.on('game-started', onGameStarted);
-    socket.on('page-selected', onPageSelected);
-    socket.on('game-finished', onGameFinished);
+        setSocket(socketInstance);
 
-    // クリーンアップ関数
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('connect_error', onConnectError);
-      socket.off('disconnect', onDisconnect);
-      socket.off('error', onError);
-      socket.off('room-created', onRoomCreated);
-      socket.off('room-joined', onRoomJoined);
-      socket.off('player-joined', onPlayerJoined);
-      socket.off('player-left', onPlayerLeft);
-      socket.off('game-started', onGameStarted);
-      socket.off('page-selected', onPageSelected);
-      socket.off('game-finished', onGameFinished);
-    };
+        return () => {
+          socketInstance.disconnect();
+        };
+      })
+      .catch((error) => {
+        console.error('Failed to connect to socket server:', error);
+        setConnectionError('サーバーに接続できませんでした');
+      });
   }, []);
 
   // 部屋を作成
   const createRoom = (name: string) => {
-    if (isConnected) {
+    if (socket) {
       console.log('Creating room with player name:', name);
       setPlayerName(name);
       socket.emit('create-room', { playerName: name });
@@ -198,10 +189,22 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
 
   // 部屋に参加
   const joinRoom = (rid: string, name: string) => {
-    if (isConnected) {
+    if (socket) {
       console.log('Joining room:', rid, 'with player name:', name);
       setPlayerName(name);
       socket.emit('join-room', { roomId: rid, playerName: name });
+      
+      // リクエスト送信後、3秒後にもまだroomIdが設定されていなければエラーをクリアして再試行できるようにする
+      const joinTimeout = setTimeout(() => {
+        // roomIdの現在の値を取得するためにstateではなく、直接ここでroomIdステートを確認
+        if (!roomId) {
+          console.log('No response after join-room request, clearing submission state');
+          setConnectionError('部屋への参加に失敗しました。もう一度お試しください。');
+        }
+      }, 3000);
+
+      // クリーンアップ関数を返して、コンポーネントがアンマウントされた場合やroomIdが設定された場合にタイマーをクリア
+      return () => clearTimeout(joinTimeout);
     } else {
       console.error('Socket not connected when trying to join room');
       setConnectionError('サーバーに接続できていません。再読み込みしてください。');
@@ -210,7 +213,7 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
 
   // ゲーム開始
   const startGame = () => {
-    if (isConnected && roomId) {
+    if (socket && roomId) {
       console.log('Starting game in room:', roomId);
       socket.emit('start-game', { roomId });
     } else {
@@ -221,7 +224,7 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
 
   // ページ選択
   const selectPage = (pageName: string, useContinuousTurn: boolean = false) => {
-    if (isConnected && roomId) {
+    if (socket && roomId) {
       console.log('Selecting page:', pageName, 'in room:', roomId, useContinuousTurn ? 'with continuous turn' : '');
       socket.emit('select-page', { roomId, pageName, useContinuousTurn });
     } else {
@@ -230,22 +233,24 @@ export const SocketProvider = ({ children }: SocketProviderProps) => {
     }
   };
 
-  return (
-    <SocketContext.Provider value={{ 
-      socket,
-      isConnected,
-      connectionError, 
-      room, 
-      roomId, 
-      playerName,
-      canUseContinuousTurn,
-      createRoom,
-      joinRoom,
-      startGame,
-      selectPage,
-      setPlayerName
-    }}>
-      {children}
-    </SocketContext.Provider>
-  );
-}; 
+  // コンテキスト値
+  const value: SocketContextType = {
+    socket,
+    isConnected,
+    roomId,
+    room,
+    playerName,
+    connectionError,
+    canUseContinuousTurn,
+    createRoom,
+    joinRoom,
+    startGame,
+    selectPage,
+    setPlayerName,
+  };
+
+  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
+};
+
+// カスタムフック
+export const useSocket = () => useContext(SocketContext); 
