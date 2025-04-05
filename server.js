@@ -1,7 +1,72 @@
 import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
-import { processPageSelection } from "./app/utils/goal-detector";
+
+// プレイヤー選択したページがゴールかどうかを判定する関数
+function processPageSelection(room, pageName, socketId) {
+  // 現在のプレイヤーかどうかチェック
+  const currentPlayer = room.players[room.currentPlayerIndex];
+  if (currentPlayer.id !== socketId) {
+    return { 
+      success: false, 
+      isGoal: false, 
+      goalPlayer: null,
+      message: 'あなたの番ではありません' 
+    };
+  }
+
+  // ページを更新
+  room.currentPage = pageName;
+
+  // ページ名を正規化
+  const normalizedSelectedPage = normalizePageName(pageName);
+  
+  // ゴールチェック - 誰かのゴールページに到達したかを判定
+  let goalPlayer = null;
+  const isGoal = room.players.some(player => {
+    // ゴールページ名も正規化して比較
+    const normalizedGoalPage = normalizePageName(player.goalPage);
+    
+    if (normalizedGoalPage === normalizedSelectedPage) {
+      goalPlayer = player;
+      console.log(`ゴール一致: 選択="${pageName}"(正規化="${normalizedSelectedPage}"), 目標="${player.goalPage}"(正規化="${normalizedGoalPage}")`);
+      return true;
+    }
+    return false;
+  });
+
+  if (isGoal && goalPlayer) {
+    // 勝者設定
+    room.players.forEach(player => {
+      player.isWinner = player.id === goalPlayer.id;
+    });
+    room.status = 'finished';
+    console.log(`ゴール判定: ${goalPlayer.name}(${goalPlayer.id}) が勝者になりました。ゴールページ: ${goalPlayer.goalPage}`);
+    return { 
+      success: true, 
+      isGoal: true, 
+      goalPlayer 
+    };
+  } else {
+    // 次のプレイヤーへ
+    room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
+    return { 
+      success: true, 
+      isGoal: false, 
+      goalPlayer: null 
+    };
+  }
+}
+
+// ページ名を正規化する関数 - 比較のために特殊文字や空白を処理
+function normalizePageName(pageName) {
+  return pageName
+    .toLowerCase()
+    .replace(/[_\s]/g, '') // アンダースコアと空白を削除
+    .replace(/[（(]/g, '') // 左括弧を削除
+    .replace(/[）)]/g, '') // 右括弧を削除
+    .normalize('NFKC'); // 全角・半角を統一
+}
 
 // 環境変数
 const dev = process.env.NODE_ENV !== "production";
