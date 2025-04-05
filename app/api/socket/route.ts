@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
 // サーバーの起動確認用のAPIエンドポイント
-export async function GET() {
-  return new NextResponse('Socket.IO server is running via /api/socket/io', { status: 200 });
+export function GET() {
+  return NextResponse.json({ status: 'ok', message: 'Socket.IO connection check endpoint' });
 } 

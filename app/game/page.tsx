@@ -7,16 +7,16 @@ import { GameRoom } from '../components/GameRoom';
 
 export default function GamePage() {
   const router = useRouter();
-  const { roomId, connected } = useSocket();
+  const { roomId, isConnected } = useSocket();
 
   // roomIdがない場合はホームに戻る
   useEffect(() => {
-    if (connected && !roomId) {
+    if (isConnected && !roomId) {
       router.push('/');
     }
-  }, [roomId, connected, router]);
+  }, [roomId, isConnected, router]);
 
-  if (!connected) {
+  if (!isConnected) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">

@@ -1,34 +1,18 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-// ソケットコンテキストの型定義
-interface SocketContextType {
-  socket: Socket | null;
-  connected: boolean;
-  roomId: string | null;
-  room: Room | null;
-  playerName: string;
-  error: string | null;
-  createRoom: (playerName: string) => void;
-  joinRoom: (roomId: string, playerName: string) => void;
-  startGame: () => void;
-  selectPage: (pageName: string) => void;
-  setPlayerName: (name: string) => void;
-}
-
-// プレイヤーの型定義
+// Room型とPlayer型の定義
 export interface Player {
   id: string;
   name: string;
   goalPage: string;
-  goalDescription?: string; // ゴールページの説明文
+  goalDescription?: string;
   isReady: boolean;
   isWinner: boolean;
 }
 
-// 部屋の型定義
 export interface Room {
   id: string;
   creator: string;
@@ -39,87 +23,119 @@ export interface Room {
   currentPlayerIndex: number;
 }
 
-// コンテキストの初期値
-const defaultContextValue: SocketContextType = {
+// コンテキストの型定義
+interface SocketContextType {
+  socket: Socket | null;
+  isConnected: boolean;
+  connectionError: string | null;
+  room: Room | null;
+  roomId: string | null;
+  playerName: string;
+  createRoom: (playerName: string) => void;
+  joinRoom: (roomId: string, playerName: string) => void;
+  startGame: () => void;
+  selectPage: (pageName: string) => void;
+  setPlayerName: (name: string) => void;
+}
+
+// コンテキストの作成
+const SocketContext = createContext<SocketContextType>({
   socket: null,
-  connected: false,
-  roomId: null,
+  isConnected: false,
+  connectionError: null,
   room: null,
+  roomId: null,
   playerName: '',
-  error: null,
   createRoom: () => {},
   joinRoom: () => {},
   startGame: () => {},
   selectPage: () => {},
   setPlayerName: () => {},
-};
+});
 
-// ソケットコンテキストの作成
-export const SocketContext = createContext<SocketContextType>(defaultContextValue);
+// コンテキストを使用するためのフック
+export const useSocket = () => useContext(SocketContext);
 
-// ソケットコンテキストプロバイダー
-export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+// プロバイダーの型定義
+interface SocketProviderProps {
+  children: ReactNode;
+}
+
+// コンテキストプロバイダー
+export const SocketProvider = ({ children }: SocketProviderProps) => {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [connected, setConnected] = useState<boolean>(false);
-  const [roomId, setRoomId] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
 
-  // ソケット初期化
   useEffect(() => {
-    // サーバー起動を確認
-    fetch('/api/socket')
-      .then((response) => response.text())
-      .then((text) => {
-        console.log('Socket API response:', text);
-        
-        // Socket.IOクライアントの初期化
-        // 環境変数から接続先を取得するか、デフォルト値を使用
-        const socketURL = process.env.NEXT_PUBLIC_SOCKET_URL || 
-          (process.env.NODE_ENV === 'production' 
-            ? window.location.origin 
-            : 'http://localhost:3001');
-        
-        // Socket.IOの設定オプション
+    // サーバーのエンドポイントが有効かどうかまず確認
+    const checkSocketServer = async () => {
+      try {
+        const apiEndpoint = '/api/socket/io';
+        const response = await fetch(apiEndpoint);
+        if (!response.ok) {
+          throw new Error(`Socket server check failed: ${response.statusText}`);
+        }
+        console.log('Socket server check successful, attempting to connect...');
+        return true;
+      } catch (error) {
+        console.error('Socket server check failed:', error);
+        setConnectionError('Failed to connect to socket server. Please try again later.');
+        return false;
+      }
+    };
+
+    const initializeSocket = async () => {
+      const serverIsUp = await checkSocketServer();
+      if (!serverIsUp) return;
+
+      try {
         const socketOptions = {
-          // 本番環境の場合はAPIルートのパスを設定
-          ...(process.env.NODE_ENV === 'production' && { 
-            path: '/api/socket/io',
-            transports: ['polling', 'websocket'],
-          }),
-          autoConnect: true,
-          reconnection: true,
+          path: '/api/socket/io',
+          transports: ['polling', 'websocket'],
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
-          timeout: 20000,
+          autoConnect: true,
         };
-          
-        console.log('Connecting to Socket.IO server at:', socketURL, socketOptions);
-        const socketInstance = io(socketURL, socketOptions);
+
+        console.log('Initializing socket with options:', socketOptions);
+        const socketInstance = io('', socketOptions);
 
         socketInstance.on('connect', () => {
-          console.log('Connected to socket server with ID:', socketInstance.id);
-          setConnected(true);
-          setError(null);
+          console.log('Socket connected:', socketInstance.id);
+          setIsConnected(true);
+          setConnectionError(null);
         });
 
         socketInstance.on('connect_error', (err) => {
-          console.error('Socket connection error:', err, err.message);
-          setError(`サーバー接続エラー: ${err.message}`);
+          console.error('Socket connection error:', err);
+          setConnectionError(`Connection error: ${err.message}`);
+          setIsConnected(false);
         });
 
-        socketInstance.on('disconnect', () => {
-          console.log('Disconnected from socket server');
-          setConnected(false);
+        socketInstance.on('disconnect', (reason) => {
+          console.log('Socket disconnected:', reason);
+          setIsConnected(false);
+          if (reason === 'io server disconnect') {
+            // サーバー側から強制切断された場合は再接続を試みる
+            socketInstance.connect();
+          }
         });
 
-        socketInstance.on('error', ({ message }: { message: string }) => {
-          console.error('Socket error received:', message);
-          setError(message);
-          setTimeout(() => setError(null), 5000);
+        socketInstance.on('error', (error) => {
+          console.error('Socket error:', error);
+          if (typeof error === 'object' && error !== null && 'message' in error) {
+            setConnectionError(`Socket error: ${(error as { message: string }).message}`);
+          } else {
+            setConnectionError('An unknown socket error occurred');
+          }
+          setTimeout(() => setConnectionError(null), 5000);
         });
 
+        // ゲーム関連のイベントハンドラを設定
         socketInstance.on('room-created', ({ roomId, room }: { roomId: string; room: Room }) => {
           console.log('Room created:', roomId);
           setRoomId(roomId);
@@ -159,91 +175,81 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         setSocket(socketInstance);
 
+        // クリーンアップ関数
         return () => {
+          console.log('Cleaning up socket connection');
           socketInstance.disconnect();
         };
-      })
-      .catch((error) => {
-        console.error('Failed to connect to socket server:', error);
-        setError('サーバーに接続できませんでした');
-      });
+      } catch (error) {
+        console.error('Error initializing socket:', error);
+        setConnectionError('Failed to initialize socket connection');
+      }
+    };
+
+    initializeSocket();
   }, []);
 
   // 部屋を作成
   const createRoom = (name: string) => {
-    if (socket) {
+    if (socket && isConnected) {
       console.log('Creating room with player name:', name);
       setPlayerName(name);
       socket.emit('create-room', { playerName: name });
     } else {
       console.error('Socket not connected when trying to create room');
-      setError('サーバーに接続できていません。再読み込みしてください。');
+      setConnectionError('サーバーに接続できていません。再読み込みしてください。');
     }
   };
 
   // 部屋に参加
   const joinRoom = (rid: string, name: string) => {
-    if (socket) {
+    if (socket && isConnected) {
       console.log('Joining room:', rid, 'with player name:', name);
       setPlayerName(name);
       socket.emit('join-room', { roomId: rid, playerName: name });
-      
-      // リクエスト送信後、3秒後にもまだroomIdが設定されていなければエラーをクリアして再試行できるようにする
-      const joinTimeout = setTimeout(() => {
-        // roomIdの現在の値を取得するためにstateではなく、直接ここでroomIdステートを確認
-        if (!roomId) {
-          console.log('No response after join-room request, clearing submission state');
-          setError('部屋への参加に失敗しました。もう一度お試しください。');
-        }
-      }, 3000);
-
-      // クリーンアップ関数を返して、コンポーネントがアンマウントされた場合やroomIdが設定された場合にタイマーをクリア
-      return () => clearTimeout(joinTimeout);
     } else {
       console.error('Socket not connected when trying to join room');
-      setError('サーバーに接続できていません。再読み込みしてください。');
+      setConnectionError('サーバーに接続できていません。再読み込みしてください。');
     }
   };
 
   // ゲーム開始
   const startGame = () => {
-    if (socket && roomId) {
+    if (socket && isConnected && roomId) {
       console.log('Starting game in room:', roomId);
       socket.emit('start-game', { roomId });
     } else {
       console.error('Socket not connected or room ID not set when trying to start game');
-      setError('ゲームを開始できません。再読み込みしてください。');
+      setConnectionError('ゲームを開始できません。再読み込みしてください。');
     }
   };
 
   // ページ選択
   const selectPage = (pageName: string) => {
-    if (socket && roomId) {
+    if (socket && isConnected && roomId) {
       console.log('Selecting page:', pageName, 'in room:', roomId);
       socket.emit('select-page', { roomId, pageName });
     } else {
       console.error('Socket not connected or room ID not set when trying to select page');
-      setError('ページを選択できません。再読み込みしてください。');
+      setConnectionError('ページを選択できません。再読み込みしてください。');
     }
   };
 
-  // コンテキスト値
-  const value: SocketContextType = {
-    socket,
-    connected,
-    roomId,
-    room,
-    playerName,
-    error,
-    createRoom,
-    joinRoom,
-    startGame,
-    selectPage,
-    setPlayerName,
-  };
-
-  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
-};
-
-// カスタムフック
-export const useSocket = () => useContext(SocketContext); 
+  return (
+    <SocketContext.Provider value={{ 
+      socket,
+      isConnected,
+      connectionError, 
+      room, 
+      roomId, 
+      playerName,
+      createRoom,
+      joinRoom,
+      startGame,
+      selectPage,
+      setPlayerName
+    }}>
+      {children}
+    </SocketContext.Provider>
+  );
+}; 

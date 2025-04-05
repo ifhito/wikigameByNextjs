@@ -6,7 +6,7 @@ import { useSocket } from './contexts/SocketContext';
 
 export default function Home() {
   const router = useRouter();
-  const { createRoom, joinRoom, error, roomId } = useSocket();
+  const { createRoom, joinRoom, connectionError, roomId } = useSocket();
   const [playerName, setPlayerName] = useState('');
   const [joinRoomId, setJoinRoomId] = useState('');
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
@@ -48,11 +48,11 @@ export default function Home() {
 
   // エラーが発生したら送信状態をリセット
   useEffect(() => {
-    if (error) {
-      console.log('エラーを検知しました。送信状態をリセットします:', error);
+    if (connectionError) {
+      console.log('エラーを検知しました。送信状態をリセットします:', connectionError);
       setIsSubmitting(false);
     }
-  }, [error]);
+  }, [connectionError]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-gray-50">
@@ -72,9 +72,9 @@ export default function Home() {
           </ul>
         </div>
         
-        {error && (
+        {connectionError && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
+            {connectionError}
           </div>
         )}
         
