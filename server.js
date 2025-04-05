@@ -4,6 +4,27 @@ import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
 
+/**
+ * @typedef {Object} Player
+ * @property {string} id - プレイヤーのID
+ * @property {string} name - プレイヤー名
+ * @property {string} goalPage - 目標ページ
+ * @property {string} [goalDescription] - 目標ページの説明
+ * @property {boolean} isReady - 準備完了状態
+ * @property {boolean} isWinner - 勝者かどうか
+ */
+
+/**
+ * @typedef {Object} Room
+ * @property {string} id - 部屋ID
+ * @property {string} creator - 作成者ID
+ * @property {Player[]} players - プレイヤー一覧
+ * @property {'waiting' | 'playing' | 'finished'} status - 部屋の状態
+ * @property {string} currentPage - 現在のページ
+ * @property {string} startingPage - 開始ページ
+ * @property {number} currentPlayerIndex - 現在のプレイヤーインデックス
+ */
+
 // ゴール検出ロジックのインポート（ローカル実装として処理）
 const normalizePageName = (pageName) => {
   return pageName
@@ -16,6 +37,9 @@ const normalizePageName = (pageName) => {
 
 /**
  * ページ選択時のゴール判定を行う関数
+ * @param {Room} room - 部屋情報
+ * @param {string} pageName - 選択されたページ名
+ * @returns {{isGoal: boolean, goalPlayer: Player|null, nextPlayerIndex: number}} - ゴール判定結果
  */
 const checkGoal = (room, pageName) => {
   // ページ名を正規化
@@ -47,6 +71,8 @@ const checkGoal = (room, pageName) => {
 
 /**
  * 勝者を設定する関数
+ * @param {Room} room - 部屋情報
+ * @param {string} goalPlayerId - 勝者のプレイヤーID
  */
 const setWinner = (room, goalPlayerId) => {
   room.players.forEach(player => {
@@ -57,6 +83,10 @@ const setWinner = (room, goalPlayerId) => {
 
 /**
  * ゴール判定と状態更新を一括で行う関数
+ * @param {Room} room - 部屋情報
+ * @param {string} pageName - 選択されたページ名
+ * @param {string} socketId - ソケットID
+ * @returns {{success: boolean, isGoal: boolean, goalPlayer: Player|null, message?: string}} - 処理結果
  */
 const processPageSelection = (room, pageName, socketId) => {
   // 現在のプレイヤーかどうかチェック
