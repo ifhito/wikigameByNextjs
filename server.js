@@ -165,8 +165,8 @@ async function getRandomWikipediaPage() {
 }
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
-const port = 3000;
+const hostname = dev ? "localhost" : undefined;  // 本番環境では不要
+const port = parseInt(process.env.PORT || "3000", 10);  // 数値型に変換
 // when using middleware `hostname` and `port` must be provided below
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
