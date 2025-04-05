@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 
 // モック用のインポート
 interface Player {
@@ -45,25 +45,19 @@ const createMockRoom = (): Room => ({
   currentPlayerIndex: 0,
 });
 
-// Socket.IOのモック
-const createMockIo = () => ({
-  to: jest.fn().mockReturnThis(),
-  emit: jest.fn(),
-});
-
-// socketのモック
-const createMockSocket = (id: string) => ({
-  id,
-  emit: jest.fn(),
-});
+// 関数の戻り値の型定義
+interface GoalCheckResult {
+  success: boolean;
+  isGoal?: boolean;
+  message?: string;
+  goalPlayer?: Player | null;
+}
 
 describe('ゴール判定テスト', () => {
   let mockRoom: Room;
-  let mockIo: any;
-  let mockSocket: any;
   
   // テスト用のゴール判定関数
-  const checkGoal = (room: Room, pageName: string, socketId: string) => {
+  const checkGoal = (room: Room, pageName: string, socketId: string): GoalCheckResult => {
     // 現在のプレイヤーを取得
     const currentPlayerIndex = room.players.findIndex(player => player.id === socketId);
     if (currentPlayerIndex === -1 || currentPlayerIndex !== room.currentPlayerIndex) {
@@ -74,7 +68,7 @@ describe('ゴール判定テスト', () => {
     room.currentPage = pageName;
     
     // ゴールチェック
-    let goalPlayer = null;
+    let goalPlayer: Player | null = null;
     const isGoal = room.players.some(player => {
       if (player.goalPage === pageName) {
         player.isWinner = true;
@@ -96,8 +90,6 @@ describe('ゴール判定テスト', () => {
   
   beforeEach(() => {
     mockRoom = createMockRoom();
-    mockIo = createMockIo();
-    mockSocket = createMockSocket('player1');
   });
   
   it('プレイヤー1が自分のゴールページに到達すると勝者になる', () => {

@@ -75,8 +75,13 @@ async function getRandomWikipediaPage(): Promise<WikipediaPageInfo> {
 // Socket.IOサーバーを初期化する関数
 function initSocketServer() {
   if (!io) {
-    // @ts-expect-error - これはNext.js App RouterでのSocket.IOの設定に必要
-    if (!(global as Record<string, any>).io) {
+    // グローバルオブジェクトに保存されたio型の定義
+    interface GlobalWithIO {
+      io: Server;
+    }
+    
+    // グローバルオブジェクトにioプロパティがない場合、新しく作成する
+    if (!(typeof global !== 'undefined' && 'io' in global)) {
       console.log('Initializing Socket.IO server');
       
       // Socket.IOサーバーの初期化
@@ -86,8 +91,10 @@ function initSocketServer() {
         },
       });
       
-      // @ts-expect-error - Socket.IOインスタンスをグローバルスコープに保存
-      (global as Record<string, any>).io = io;
+      // グローバルスコープにSocket.IOインスタンスを保存
+      if (typeof global !== 'undefined') {
+        (global as unknown as GlobalWithIO).io = io;
+      }
       
       io.on('connection', (socket) => {
         console.log('New client connected', socket.id);
@@ -293,7 +300,9 @@ function initSocketServer() {
       console.log('Socket.IO server started on port 3001');
     } else {
       // 既存のSocket.IOインスタンスを使用
-      io = (global as Record<string, any>).io;
+      if (typeof global !== 'undefined') {
+        io = (global as unknown as GlobalWithIO).io;
+      }
     }
   }
   
