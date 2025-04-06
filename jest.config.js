@@ -25,4 +25,12 @@ module.exports = {
     '!**/*.d.ts',
     '!**/node_modules/**',
   ],
+  globals: {
+    'ts-jest': {
+      useESM: false,
+    }
+  },
+  testEnvironmentOptions: {
+    customExportConditions: ['node', 'node-addons'],
+  }
 }; 

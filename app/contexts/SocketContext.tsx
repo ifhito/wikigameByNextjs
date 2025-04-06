@@ -11,7 +11,7 @@ interface SocketContextType {
   room: Room | null;
   playerName: string;
   connectionError: string | null;
-  createRoom: (playerName: string) => void;
+  createRoom: (playerName: string, gameMode?: 'competitive' | 'cooperative') => void;
   joinRoom: (roomId: string, playerName: string) => void;
   startGame: () => void;
   selectPage: (pageName: string, useContinuousTurn?: boolean) => void;
@@ -40,6 +40,11 @@ export interface Room {
   currentPage: string;
   startingPage: string;
   currentPlayerIndex: number;
+  gameMode: 'competitive' | 'cooperative';
+  commonGoalPage?: string;
+  commonGoalDescription?: string;
+  totalTurnsLeft?: number;
+  maxTotalTurns?: number;
 }
 
 // コンテキストの初期値
@@ -252,11 +257,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   // 部屋を作成
-  const createRoom = (name: string) => {
+  const createRoom = (name: string, gameMode: 'competitive' | 'cooperative' = 'competitive') => {
     if (socket) {
-      console.log('Creating room with player name:', name);
+      console.log('Creating room with player name:', name, 'game mode:', gameMode);
       setPlayerName(name);
-      socket.emit('create-room', { playerName: name });
+      socket.emit('create-room', { playerName: name, gameMode });
     } else {
       console.error('Socket not connected when trying to create room');
       setConnectionError('サーバーに接続できていません。再読み込みしてください。');

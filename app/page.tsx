@@ -12,6 +12,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'create' | 'join'>('create');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [gameMode, setGameMode] = useState<'solo' | 'multi'>('multi');
+  const [multiplayerMode, setMultiplayerMode] = useState<'competitive' | 'cooperative'>('competitive');
 
   // roomIdが設定されたらゲーム画面に遷移
   useEffect(() => {
@@ -25,9 +26,9 @@ export default function Home() {
     e.preventDefault();
     if (!playerName.trim() || isSubmitting) return;
     
-    console.log('部屋の作成を開始します');
+    console.log('部屋の作成を開始します', multiplayerMode === 'cooperative' ? '(協力モード)' : '(対戦モード)');
     setIsSubmitting(true);
-    createRoom(playerName);
+    createRoom(playerName, multiplayerMode);
   };
 
   const handleJoinRoom = (e: React.FormEvent) => {
@@ -76,7 +77,8 @@ export default function Home() {
             <li>目標ページに到達すると勝利です</li>
           </ul>
           <p className="text-gray-700 text-sm">
-            <span className="font-semibold">多人数モード:</span> 友達と対戦して、目標ページに最初に到達したプレイヤーが勝利します。<br />
+            <span className="font-semibold">対戦モード:</span> 友達と対戦して、それぞれの目標ページに最初に到達したプレイヤーが勝利します。<br />
+            <span className="font-semibold">協力モード:</span> みんなで力を合わせて共通の目標ページに合計6ターン以内に到達しましょう。<br />
             <span className="font-semibold">一人用モード:</span> 6回以内のクリックで目標ページに到達できるかチャレンジします。
           </p>
         </div>
@@ -106,6 +108,39 @@ export default function Home() {
             </button>
           </div>
         </div>
+        
+        {/* 多人数モードで対戦/協力の選択 */}
+        {gameMode === 'multi' && (
+          <div className="mb-6">
+            <div className="bg-gray-100 rounded-lg p-2 flex">
+              <button
+                onClick={() => setMultiplayerMode('competitive')}
+                className={`flex-1 py-2 px-3 rounded-md text-sm ${
+                  multiplayerMode === 'competitive'
+                    ? 'bg-orange-500 text-white font-bold shadow-md'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                対戦モード
+              </button>
+              <button
+                onClick={() => setMultiplayerMode('cooperative')}
+                className={`flex-1 py-2 px-3 rounded-md ml-2 text-sm ${
+                  multiplayerMode === 'cooperative'
+                    ? 'bg-purple-500 text-white font-bold shadow-md'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                協力モード
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-gray-600">
+              {multiplayerMode === 'competitive' 
+                ? '対戦モード：それぞれ自分のゴールを目指して競い合います。' 
+                : '協力モード：全員で同じゴールを目指し、合計6ターン以内に到達してください。'}
+            </p>
+          </div>
+        )}
         
         {connectionError && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">

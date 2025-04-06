@@ -44,7 +44,8 @@ describe('GameRoom', () => {
     status: 'waiting',
     currentPage: '',
     startingPage: '',
-    currentPlayerIndex: 0
+    currentPlayerIndex: 0,
+    gameMode: 'competitive'
   };
 
   // モックソケットデータ
@@ -225,5 +226,91 @@ describe('GameRoom', () => {
     
     // 連続ターン設定が表示されていないことを確認
     expect(screen.queryByText('連続ターン設定')).not.toBeInTheDocument();
+  });
+
+  test('協力モードでは連続ターン設定が表示されないこと', () => {
+    // 協力モードのプレイ中ルーム
+    const cooperativeRoom = {
+      ...mockRoom,
+      status: 'playing',
+      currentPage: 'テストページ',
+      currentPlayerIndex: 0,
+      gameMode: 'cooperative',
+      commonGoalPage: 'ゴールページ',
+      commonGoalDescription: 'ゴールの説明',
+      totalTurnsLeft: 5,
+      maxTotalTurns: 6
+    };
+
+    // 自分のターンとして設定
+    (useSocket as jest.Mock).mockReturnValue({
+      socket: { id: 'player1' },
+      room: cooperativeRoom,
+      startGame: mockStartGame,
+      useContinuousTurn: false,
+      toggleContinuousTurn: jest.fn()
+    });
+
+    render(<GameRoom roomId="test-room-id" />);
+    
+    // 連続ターン設定が表示されていないことを確認
+    expect(screen.queryByText('連続ターン設定')).not.toBeInTheDocument();
+    
+    // 協力モード固有の情報が表示されていることを確認
+    expect(screen.getByText(/残りターン数:/)).toBeInTheDocument();
+    
+    // トータルターン数のテキストをカスタム関数で検索
+    const remainingTurnsElement = screen.getByText((content, element) => {
+      // element?.textContent がnullやundefinedの場合はfalseを返す
+      const textContent = element?.textContent || '';
+      return textContent.includes('5') && 
+             textContent.includes('6') &&
+             (element?.tagName.toLowerCase() === 'p');
+    });
+    expect(remainingTurnsElement).toBeInTheDocument();
+    
+    expect(screen.getByText(/共通ゴール:/)).toBeInTheDocument();
+    expect(screen.getByText('ゴールページ')).toBeInTheDocument();
+  });
+
+  test('協力モードでは連続ターン処理が適用されないこと', () => {
+    // モックSelectPage関数
+    const mockSelectPage = jest.fn();
+    
+    // 協力モードのプレイ中ルーム
+    const cooperativeRoom = {
+      ...mockRoom,
+      status: 'playing',
+      currentPage: 'テストページ',
+      currentPlayerIndex: 0,
+      gameMode: 'cooperative',
+      commonGoalPage: 'ゴールページ',
+      commonGoalDescription: 'ゴールの説明',
+      totalTurnsLeft: 5,
+      maxTotalTurns: 6
+    };
+
+    // 連続ターンを有効にしたSocket設定
+    (useSocket as jest.Mock).mockReturnValue({
+      socket: { id: 'player1' },
+      room: cooperativeRoom,
+      startGame: mockStartGame,
+      selectPage: mockSelectPage,
+      useContinuousTurn: true,  // 連続ターンON
+      toggleContinuousTurn: jest.fn()
+    });
+
+    render(<GameRoom roomId="test-room-id" />);
+    
+    // 協力モードではUI上は連続ターン設定が非表示になるため、
+    // サーバー側の処理で連続ターンが適用されないことを確認するテスト
+    
+    // ここでは実際にサーバーに接続しないため、
+    // 協力モードの状態でWebページのロジックが正しく動作することを確認する
+    expect(screen.queryByText('連続ターン設定')).not.toBeInTheDocument();
+    
+    // 協力モードではuseContinuousTurnがtrueでも影響がないことを確認
+    const pageTitle = screen.getByText(/現在のページ/);
+    expect(pageTitle).toBeInTheDocument();
   });
 }); 

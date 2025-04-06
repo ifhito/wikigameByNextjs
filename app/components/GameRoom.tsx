@@ -35,19 +35,26 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
   const isWaiting = room.status === 'waiting';
   const isPlaying = room.status === 'playing';
   const isFinished = room.status === 'finished';
+  const isCooperativeMode = room.gameMode === 'cooperative';
   
   // 勝者が存在するかチェック
   const winner = room.players.find(p => p.isWinner);
+  const allPlayersWon = isCooperativeMode && room.players.every(p => p.isWinner);
 
   // 現在のページがプレイヤーのゴールページと一致するかチェック
-  const isGoalReached = isPlaying && room.players.some(player => {
-    if (player.id !== socket.id) return false;
-    
-    const normalizedCurrentPage = normalizePageTitle(room.currentPage);
-    const normalizedGoalPage = normalizePageTitle(player.goalPage);
-    
-    return normalizedCurrentPage === normalizedGoalPage || room.currentPage === player.goalPage;
-  });
+  const isGoalReached = isPlaying && (
+    isCooperativeMode 
+      ? normalizePageTitle(room.currentPage) === normalizePageTitle(room.commonGoalPage || '') || 
+        room.currentPage === room.commonGoalPage
+      : room.players.some(player => {
+          if (player.id !== socket.id) return false;
+          
+          const normalizedCurrentPage = normalizePageTitle(room.currentPage);
+          const normalizedGoalPage = normalizePageTitle(player.goalPage);
+          
+          return normalizedCurrentPage === normalizedGoalPage || room.currentPage === player.goalPage;
+        })
+  );
 
   const copyRoomId = async () => {
     try {
@@ -116,7 +123,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
 
           <div className="bg-white rounded-lg shadow p-4">
             <h2 className="text-xl font-bold mb-2 text-gray-900">ゲーム状態</h2>
-            <div className="mt-2">
+            <div className="flex justify-between items-center mb-2">
               <span
                 className={`inline-block px-2 py-1 rounded text-sm ${
                   isWaiting
@@ -128,7 +135,40 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
               >
                 {isWaiting ? '待機中' : isPlaying ? 'プレイ中' : '終了'}
               </span>
+              
+              <span
+                className={`inline-block px-2 py-1 rounded text-sm ${
+                  isCooperativeMode
+                    ? 'bg-purple-100 text-purple-800'
+                    : 'bg-orange-100 text-orange-800'
+                }`}
+              >
+                {isCooperativeMode ? '協力モード' : '対戦モード'}
+              </span>
             </div>
+            
+            {/* 協力モードの場合、残りターン数を表示 */}
+            {isPlaying && isCooperativeMode && (
+              <div className="mt-2 mb-4">
+                <div className="bg-gray-100 p-2 rounded-md">
+                  <p className="text-sm font-medium text-gray-700">残りターン数: <span className={`font-bold ${room.totalTurnsLeft && room.totalTurnsLeft <= 2 ? 'text-red-600' : ''}`}>{room.totalTurnsLeft}</span>/{room.maxTotalTurns}</p>
+                  <p className="text-xs text-gray-600 mt-1">全員で協力して共通ゴールを目指します</p>
+                </div>
+              </div>
+            )}
+
+            {/* 協力モードかつプレイ中の場合、共通ゴールを表示 */}
+            {isCooperativeMode && (
+              <div className="mt-2 mb-4">
+                <div className="bg-purple-50 p-2 rounded-md border border-purple-100">
+                  <p className="text-sm font-medium text-purple-800">共通ゴール:</p>
+                  <p className="text-base font-bold text-purple-900 mt-1">{room.commonGoalPage}</p>
+                  {room.commonGoalDescription && (
+                    <p className="text-xs text-purple-700 mt-1">{room.commonGoalDescription.substring(0, 100)}{room.commonGoalDescription.length > 100 ? '...' : ''}</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {isWaiting && (
               <div className="mt-4">
@@ -151,8 +191,9 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
               </div>
             )}
             
-            {/* 自分の番かつゲーム進行中かつ連続ターンが残っている場合に連続ターン設定を表示 */}
-            {isPlaying && isCurrentPlayerTurn && getCurrentPlayerTurnsLeft() > 0 && (
+            {/* 自分の番かつゲーム進行中かつ連続ターンが残っている場合に連続ターン設定を表示
+                 ただし、協力モードでは連続ターン設定を表示しない */}
+            {isPlaying && isCurrentPlayerTurn && getCurrentPlayerTurnsLeft() > 0 && !isCooperativeMode && (
               <div className="mt-4 border-t pt-4">
                 <h3 className="text-md font-semibold mb-2 text-gray-800">連続ターン設定</h3>
                 
@@ -179,6 +220,12 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
               <p className="text-gray-600">
                 参加者全員がゲームの準備ができたら、部屋の作成者がゲームを開始できます。
               </p>
+              {isCooperativeMode && (
+                <div className="mt-4 p-4 bg-purple-50 rounded-lg">
+                  <p className="text-purple-800 font-medium">協力モード</p>
+                  <p className="text-sm text-purple-700 mt-2">全員で力を合わせて共通の目標ページに合計{room.maxTotalTurns}ターン以内に到達を目指します。</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -190,20 +237,47 @@ export const GameRoom: React.FC<GameRoomProps> = ({ roomId }) => {
             <div className="bg-white rounded-lg shadow p-8 text-center">
               <h2 className="text-2xl font-bold mb-4 text-gray-900">ゲーム終了!</h2>
               
-              {/* 勝者の情報を表示 */}
-              {(winner || (isGoalReached && room.players.find(p => p.id === socket.id))) && (
-                <>
-                  <p className="text-xl mb-2 text-gray-900">
-                    <span className="font-bold">
-                      {winner ? winner.name : room.players.find(p => p.id === socket.id)?.name}
-                    </span> さんの勝利です!
-                  </p>
-                  <p className="text-md mb-6 text-gray-700">
-                    ゴールページ「<span className="font-medium">
-                      {winner ? winner.goalPage : room.players.find(p => p.id === socket.id)?.goalPage}
-                    </span>」に到達しました
-                  </p>
-                </>
+              {/* 勝者の情報を表示（協力モードと対戦モードで分ける） */}
+              {isCooperativeMode ? (
+                // 協力モードの結果表示
+                allPlayersWon ? (
+                  <>
+                    <div className="bg-green-50 p-4 rounded-lg mb-4">
+                      <p className="text-xl text-green-800 font-bold">チームの勝利！</p>
+                      <p className="text-md mt-2 text-green-700">
+                        ゴールページ「<span className="font-medium">{room.commonGoalPage}</span>」に到達しました！
+                      </p>
+                      <p className="text-sm mt-2 text-green-600">
+                        使用ターン数: {room.maxTotalTurns && room.totalTurnsLeft !== undefined ? room.maxTotalTurns - room.totalTurnsLeft : '不明'}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-red-50 p-4 rounded-lg mb-4">
+                      <p className="text-xl text-red-800 font-bold">ターン切れ...</p>
+                      <p className="text-md mt-2 text-red-700">
+                        規定のターン数内にゴールページ「<span className="font-medium">{room.commonGoalPage}</span>」に到達できませんでした
+                      </p>
+                    </div>
+                  </>
+                )
+              ) : (
+                // 対戦モードの結果表示
+                (winner || (isGoalReached && room.players.find(p => p.id === socket.id))) && (
+                  <>
+                    <p className="text-xl mb-2 text-gray-900">
+                      <span className="font-bold">
+                        {winner ? winner.name : room.players.find(p => p.id === socket.id)?.name}
+                      </span> さんの勝利です!
+                    </p>
+                    <p className="text-md mb-6 text-gray-700">
+                      ゴールページ「<span className="font-medium">
+                        {winner ? winner.goalPage : room.players.find(p => p.id === socket.id)?.goalPage}
+                      </span>」に到達しました
+                    </p>
+                  </>
+                )
               )}
               
               <p className="text-gray-600">

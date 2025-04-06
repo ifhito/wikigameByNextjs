@@ -32,6 +32,7 @@ export const PlayerList: React.FC<PlayerListProps> = ({ room, currentPlayerId })
   const isGamePlaying = room.status === 'playing';
   const isGameFinished = room.status === 'finished';
   const currentPlayerTurn = room.players[room.currentPlayerIndex];
+  const isCooperativeMode = room.gameMode === 'cooperative';
 
   return (
     <div className="bg-white rounded-lg shadow p-4 mb-4">
@@ -58,7 +59,8 @@ export const PlayerList: React.FC<PlayerListProps> = ({ room, currentPlayerId })
                 {player.isWinner && <span className="ml-2 text-xs text-green-600">勝者!</span>}
               </div>
             </div>
-            {isGamePlaying && (
+            {/* 対戦モードの場合のみ個別のゴールページを表示 */}
+            {isGamePlaying && !isCooperativeMode && (
               <div className="mt-1 text-sm">
                 <div className="flex items-center justify-between">
                   <div>
@@ -92,13 +94,33 @@ export const PlayerList: React.FC<PlayerListProps> = ({ room, currentPlayerId })
         </div>
       )}
 
-      {isGameFinished && (
+      {isGameFinished && !isCooperativeMode && (
         <div className="mt-4 p-2 bg-green-50 rounded">
           <h3 className="font-bold text-green-800">ゲーム終了!</h3>
           <p className="mt-1 text-gray-800">
             <span className="font-medium">{room.players.find((p) => p.isWinner)?.name || '誰か'}</span> さんが
             ゴールページ「<span className="font-medium">{room.players.find((p) => p.isWinner)?.goalPage}</span>」に到達しました!
           </p>
+        </div>
+      )}
+
+      {isGameFinished && isCooperativeMode && (
+        <div className="mt-4 p-2 rounded">
+          {room.players.some(p => p.isWinner) ? (
+            <div className="bg-green-50 p-2 rounded">
+              <h3 className="font-bold text-green-800">協力成功!</h3>
+              <p className="mt-1 text-green-700">
+                チーム全員でゴールページ「<span className="font-medium">{room.commonGoalPage}</span>」に到達しました!
+              </p>
+            </div>
+          ) : (
+            <div className="bg-red-50 p-2 rounded">
+              <h3 className="font-bold text-red-800">ターン切れ</h3>
+              <p className="mt-1 text-red-700">
+                規定ターン数内にゴールページ「<span className="font-medium">{room.commonGoalPage}</span>」に到達できませんでした。
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

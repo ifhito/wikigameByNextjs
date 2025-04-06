@@ -29,6 +29,11 @@ const handle = app.getRequestHandler();
  * @property {string} currentPage
  * @property {string} startingPage
  * @property {number} currentPlayerIndex
+ * @property {'competitive'|'cooperative'} gameMode
+ * @property {string} commonGoalPage
+ * @property {string} commonGoalDescription
+ * @property {number} totalTurnsLeft
+ * @property {number} maxTotalTurns
  */
 
 // 部屋のコレクション
@@ -101,7 +106,7 @@ app.prepare().then(() => {
     console.log('Client connected:', socket.id);
 
     // 部屋作成イベント
-    socket.on('create-room', async ({ playerName }) => {
+    socket.on('create-room', async ({ playerName, gameMode = 'competitive' }) => {
       try {
         const roomId = generateRoomId();
         const [startPage, goalPage] = await Promise.all([
@@ -109,11 +114,14 @@ app.prepare().then(() => {
           getRandomWikipediaPage()
         ]);
 
+        // 協力モードの場合は共通ゴールを設定
+        const isCooperative = gameMode === 'cooperative';
+        
         const player = {
           id: socket.id,
           name: playerName,
-          goalPage: goalPage.title,
-          goalDescription: goalPage.description,
+          goalPage: isCooperative ? '' : goalPage.title,
+          goalDescription: isCooperative ? '' : goalPage.description,
           isReady: false,
           isWinner: false,
           consecutiveTurnsLeft: 3  // 初期値として3ターン設定
@@ -126,14 +134,19 @@ app.prepare().then(() => {
           status: 'waiting',
           currentPage: '',
           startingPage: startPage.title,
-          currentPlayerIndex: 0
+          currentPlayerIndex: 0,
+          gameMode: gameMode,
+          commonGoalPage: isCooperative ? goalPage.title : '',
+          commonGoalDescription: isCooperative ? goalPage.description : '',
+          totalTurnsLeft: isCooperative ? 6 : 0,
+          maxTotalTurns: isCooperative ? 6 : 0
         };
 
         rooms[roomId] = room;
 
         // 部屋に参加
         socket.join(roomId);
-        console.log(`Room ${roomId} created by ${playerName}`);
+        console.log(`Room ${roomId} created by ${playerName} with game mode: ${gameMode}`);
 
         // 部屋作成成功イベント
         socket.emit('room-created', { roomId, room });
@@ -153,7 +166,7 @@ app.prepare().then(() => {
         }
 
         // ゲームが開始されているか確認
-        if (rooms[roomId].status !== 'waiting' && rooms[roomId].status !== 'finished') {
+        if (rooms[roomId].status !== 'waiting') {
           socket.emit('error', { message: 'ゲームはすでに開始されています' });
           return;
         }
@@ -171,34 +184,64 @@ app.prepare().then(() => {
           return;
         }
 
-        // ゴールページを取得
-        getRandomWikipediaPage().then(goalPage => {
-          // 新しいプレイヤーを追加
+        const room = rooms[roomId];
+        const isCooperative = room.gameMode === 'cooperative';
+
+        // 協力モードか対戦モードによってゴールページを設定
+        if (isCooperative) {
+          // 新しいプレイヤーを追加（協力モード - 共通ゴール）
           const player = {
             id: socket.id,
             name: playerName,
-            goalPage: goalPage.title,
-            goalDescription: goalPage.description,
+            goalPage: '',
+            goalDescription: '',
             isReady: false,
             isWinner: false,
             consecutiveTurnsLeft: 3  // 初期値として3ターン設定
           };
-
+          
           rooms[roomId].players.push(player);
+        } else {
+          // 対戦モード - 個別ゴール
+          getRandomWikipediaPage().then(goalPage => {
+            // 新しいプレイヤーを追加
+            const player = {
+              id: socket.id,
+              name: playerName,
+              goalPage: goalPage.title,
+              goalDescription: goalPage.description,
+              isReady: false,
+              isWinner: false,
+              consecutiveTurnsLeft: 3  // 初期値として3ターン設定
+            };
 
-          // 部屋に参加
-          socket.join(roomId);
-          console.log(`Player ${playerName} joined room ${roomId}`);
+            rooms[roomId].players.push(player);
 
-          // 部屋参加成功イベント
-          socket.emit('room-joined', { roomId, room: rooms[roomId] });
+            // 部屋に参加
+            socket.join(roomId);
+            console.log(`Player ${playerName} joined room ${roomId}`);
 
-          // 他のプレイヤーに通知
-          socket.to(roomId).emit('player-joined', { room: rooms[roomId] });
-        }).catch(error => {
-          console.error('Error getting goal page:', error);
-          socket.emit('error', { message: 'ゴールページの取得に失敗しました' });
-        });
+            // 部屋参加成功イベント
+            socket.emit('room-joined', { roomId, room: rooms[roomId] });
+
+            // 他のプレイヤーに通知
+            socket.to(roomId).emit('player-joined', { room: rooms[roomId] });
+          }).catch(error => {
+            console.error('Error getting goal page:', error);
+            socket.emit('error', { message: 'ゴールページの取得に失敗しました' });
+          });
+          return;
+        }
+
+        // 協力モードの場合はここで直接参加処理
+        socket.join(roomId);
+        console.log(`Player ${playerName} joined room ${roomId} (cooperative mode)`);
+
+        // 部屋参加成功イベント
+        socket.emit('room-joined', { roomId, room: rooms[roomId] });
+
+        // 他のプレイヤーに通知
+        socket.to(roomId).emit('player-joined', { room: rooms[roomId] });
       } catch (error) {
         console.error('Error joining room:', error);
         socket.emit('error', { message: '部屋への参加に失敗しました' });
@@ -237,43 +280,79 @@ app.prepare().then(() => {
           getRandomWikipediaPage().then(startPage => {
             rooms[roomId].startingPage = startPage.title;
             
-            // 各プレイヤーに新しいゴールページを設定
-            const goalPromises = rooms[roomId].players.map(player => {
-              return getRandomWikipediaPage().then(goalPage => {
-                player.goalPage = goalPage.title;
-                player.goalDescription = goalPage.description;
-                player.isWinner = false;
-                player.consecutiveTurnsLeft = 3; // 連続ターンをリセット
-                return player;
-              });
-            });
+            const room = rooms[roomId];
+            const isCooperative = room.gameMode === 'cooperative';
             
-            Promise.all(goalPromises).then(() => {
-              // ゲーム開始
-              rooms[roomId].status = 'playing';
-              rooms[roomId].currentPage = rooms[roomId].startingPage;
-              rooms[roomId].currentPlayerIndex = 0;
+            if (isCooperative) {
+              // 協力モードでは共通ゴールを設定
+              getRandomWikipediaPage().then(goalPage => {
+                room.commonGoalPage = goalPage.title;
+                room.commonGoalDescription = goalPage.description;
+                room.totalTurnsLeft = room.maxTotalTurns; // ターン数をリセット
+                
+                // 各プレイヤーの状態をリセット
+                room.players.forEach(player => {
+                  player.isWinner = false;
+                  player.consecutiveTurnsLeft = 3;
+                });
+                
+                // ゲーム開始
+                room.status = 'playing';
+                room.currentPage = room.startingPage;
+                room.currentPlayerIndex = 0;
+                
+                // 全プレイヤーに通知
+                io.to(roomId).emit('game-started', { room });
+                console.log(`Cooperative game restarted in room ${roomId}`);
+              });
+            } else {
+              // 対戦モードでは各プレイヤーにゴールページを設定
+              const goalPromises = room.players.map(player => {
+                return getRandomWikipediaPage().then(goalPage => {
+                  player.goalPage = goalPage.title;
+                  player.goalDescription = goalPage.description;
+                  player.isWinner = false;
+                  player.consecutiveTurnsLeft = 3; // 連続ターンをリセット
+                  return player;
+                });
+              });
               
-              // 全プレイヤーに通知
-              io.to(roomId).emit('game-started', { room: rooms[roomId] });
-              console.log(`Game restarted in room ${roomId}`);
-            });
+              Promise.all(goalPromises).then(() => {
+                // ゲーム開始
+                room.status = 'playing';
+                room.currentPage = room.startingPage;
+                room.currentPlayerIndex = 0;
+                
+                // 全プレイヤーに通知
+                io.to(roomId).emit('game-started', { room });
+                console.log(`Competitive game restarted in room ${roomId}`);
+              });
+            }
           });
         } else {
           // 通常のゲーム開始
-          rooms[roomId].status = 'playing';
-          rooms[roomId].currentPage = rooms[roomId].startingPage;
-          rooms[roomId].currentPlayerIndex = 0;
+          const room = rooms[roomId];
+          const isCooperative = room.gameMode === 'cooperative';
+          
+          // 協力モードの場合はターン数を設定
+          if (isCooperative) {
+            room.totalTurnsLeft = room.maxTotalTurns || 6; // デフォルトは6ターン
+          }
+          
+          // ゲーム開始
+          room.status = 'playing';
+          room.currentPage = room.startingPage;
+          room.currentPlayerIndex = 0;
           
           // 各プレイヤーの状態をリセット
-          rooms[roomId].players.forEach(player => {
+          room.players.forEach(player => {
             player.isWinner = false;
             player.consecutiveTurnsLeft = 3; // 連続ターンをリセット
           });
           
           // 全プレイヤーに通知
-          io.to(roomId).emit('game-started', { room: rooms[roomId] });
-          console.log(`Game started in room ${roomId}`);
+          io.to(roomId).emit('game-started', { room });
+          console.log(`Game started in room ${roomId} (${isCooperative ? 'cooperative' : 'competitive'} mode)`);
         }
       } catch (error) {
         console.error('Error starting game:', error);
@@ -298,6 +377,7 @@ app.prepare().then(() => {
 
         const room = rooms[roomId];
         const currentPlayer = room.players[room.currentPlayerIndex];
+        const isCooperative = room.gameMode === 'cooperative';
 
         // 現在のプレイヤーか確認
         if (currentPlayer.id !== socket.id) {
@@ -308,22 +388,51 @@ app.prepare().then(() => {
         // ページを更新
         room.currentPage = pageName;
 
+        // 協力モードではターンを消費
+        if (isCooperative) {
+          room.totalTurnsLeft -= 1;
+        }
+
         // 勝利条件をチェック - 正規化したタイトルで比較
         let isGameFinished = false;
         const normalizedPageName = normalizePageTitle(pageName);
-        const normalizedGoalPage = normalizePageTitle(currentPlayer.goalPage);
         
-        console.log(`Comparing pages: "${pageName}" (${normalizedPageName}) with goal "${currentPlayer.goalPage}" (${normalizedGoalPage})`);
-        
-        if (normalizedPageName === normalizedGoalPage || pageName === currentPlayer.goalPage) {
-          currentPlayer.isWinner = true;
-          room.status = 'finished';
-          isGameFinished = true;
-          console.log(`Player ${currentPlayer.name} reached goal page ${pageName}! Game finished.`);
+        if (isCooperative) {
+          // 協力モード - 共通ゴールへの到達または合計ターン終了でゲーム終了
+          const normalizedGoalPage = normalizePageTitle(room.commonGoalPage);
+          
+          console.log(`Cooperative mode: comparing "${pageName}" (${normalizedPageName}) with goal "${room.commonGoalPage}" (${normalizedGoalPage})`);
+          
+          if (normalizedPageName === normalizedGoalPage || pageName === room.commonGoalPage) {
+            // 全員が勝者
+            room.players.forEach(player => {
+              player.isWinner = true;
+            });
+            room.status = 'finished';
+            isGameFinished = true;
+            console.log(`Cooperative game: Goal page reached by ${currentPlayer.name}! All players win!`);
+          } else if (room.totalTurnsLeft <= 0) {
+            // ターン切れで敗北
+            room.status = 'finished';
+            isGameFinished = true;
+            console.log(`Cooperative game: No turns left. All players lose.`);
+          }
+        } else {
+          // 対戦モード - 個別のゴールへの到達
+          const normalizedGoalPage = normalizePageTitle(currentPlayer.goalPage);
+          
+          console.log(`Competitive mode: comparing "${pageName}" (${normalizedPageName}) with goal "${currentPlayer.goalPage}" (${normalizedGoalPage})`);
+          
+          if (normalizedPageName === normalizedGoalPage || pageName === currentPlayer.goalPage) {
+            currentPlayer.isWinner = true;
+            room.status = 'finished';
+            isGameFinished = true;
+            console.log(`Competitive game: Player ${currentPlayer.name} reached goal page ${pageName}! Game finished.`);
+          }
         }
 
         // 連続ターン処理
-        if (!isGameFinished && currentPlayer.consecutiveTurnsLeft > 0 && useContinuousTurn) {
+        if (!isGameFinished && currentPlayer.consecutiveTurnsLeft > 0 && useContinuousTurn && !isCooperative) {
           currentPlayer.consecutiveTurnsLeft -= 1;
           console.log(`Player ${currentPlayer.name} used a continuous turn. Remaining: ${currentPlayer.consecutiveTurnsLeft}`);
         } else if (!isGameFinished) {
@@ -334,7 +443,7 @@ app.prepare().then(() => {
         // 全プレイヤーに通知
         if (isGameFinished) {
           io.to(roomId).emit('game-finished', { room: rooms[roomId] });
-          console.log(`Game finished in room ${roomId}. Winner: ${currentPlayer.name}`);
+          console.log(`Game finished in room ${roomId}. Mode: ${isCooperative ? 'cooperative' : 'competitive'}`);
         } else {
           io.to(roomId).emit('page-selected', { room: rooms[roomId] });
           console.log(`Page selected in room ${roomId}: ${pageName}`);
